@@ -101,6 +101,10 @@ class ProtriderConfig:
     cohort_stability_seed: Optional[int] = None
     cohort_stability_require_oht: bool = True
     cohort_stability_save_iteration_files: bool = False
+
+    # Optional exports (disabled in cohort stability iterations for speed)
+    export_latent_space: bool = True
+    export_patient_similarity: bool = True
     
     def __post_init__(self):
         """Validate configuration after initialization and set computed fields."""

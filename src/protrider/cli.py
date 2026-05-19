@@ -294,7 +294,8 @@ def run(config_path: str):
     if config.cohort_stability:
         from protrider.stability import run_cohort_stability
 
-        baseline_long = result.to_long_df(include_all=config.report_all)
+        # Full-cohort baseline must include all pairs, not only outliers.
+        baseline_long = result.to_long_df(include_all=True)
         logger.info("Starting cohort stability analysis (subsampling)...")
         bs_summary = run_cohort_stability(config, baseline_long)
         if bs_summary is not None:

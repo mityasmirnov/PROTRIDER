@@ -15,7 +15,9 @@ from protrider.stability import (
     STABILITY_METRIC_COLUMNS,
     _generate_subsample_plan,
     _run_single_stability_iteration,
+    _subset_input_files,
     _summarize_stability,
+    _write_subset_annotation,
     run_cohort_stability,
 )
 
@@ -194,11 +196,14 @@ class TestSummarizeStability:
                 "PROTEIN_PADJ": [0.4],
             }
         )
-        out = _summarize_stability([iter0, iter1], baseline, n_runs_requested=2)
+        out = _summarize_stability(
+            [iter0, iter1], baseline, n_runs_requested=2, n_runs_completed=2
+        )
         keys = set(zip(out["sampleID"], out["proteinID"]))
         assert keys == {("s1", "p1"), ("s1", "p2"), ("s1", "p3")}
         row_p1 = out[(out["sampleID"] == "s1") & (out["proteinID"] == "p1")].iloc[0]
         assert row_p1["BS_N_RUNS_REQUESTED"] == 2
+        assert row_p1["BS_N_RUNS_COMPLETED"] == 2
         assert row_p1["BS_N_OBSERVED"] == 1
         assert row_p1["BS_N_MISSING"] == 1
         assert row_p1["BS_OBSERVED_FRACTION"] == 0.5
@@ -206,6 +211,14 @@ class TestSummarizeStability:
         assert row_p1["PROTEIN_outlier_call_rate"] == 1.0
         assert row_p1["PROTEIN_outlier_call_rate_all_runs"] == 0.5
         assert row_p1["PROTEIN_FC_median"] == pytest.approx(0.4)
+        row_p2 = out[(out["sampleID"] == "s1") & (out["proteinID"] == "p2")].iloc[0]
+        assert row_p2["BS_N_OBSERVED"] == 0
+        assert row_p2["BS_N_MISSING"] == 2
+        assert row_p2["BS_OBSERVED_FRACTION"] == 0.0
+        assert row_p2["PROTEIN_outlier_call_count"] == 0
+        assert np.isnan(row_p2["PROTEIN_outlier_call_rate"])
+        assert row_p2["PROTEIN_outlier_call_rate_all_runs"] == 0.0
+        assert row_p2["in_full_run"]
         row_p3 = out[(out["sampleID"] == "s1") & (out["proteinID"] == "p3")].iloc[0]
         assert row_p3["BS_N_OBSERVED"] == 1
         assert not row_p3["in_full_run"]
@@ -306,7 +319,7 @@ class TestCheckpointIsolation:
         assert captured["out_dir"] == str(iter_dir)
         assert captured["checkpoint_path"] == str(iter_dir / "model.pt")
         assert captured["out_dir"] != config.out_dir
-        assert "intensities_subset" in captured["input_intensities"]
+        assert captured["input_intensities"].endswith("intensities_subset.tsv")
 
 
 class TestStabilitySmokeE2E:
@@ -337,6 +350,7 @@ class TestStabilitySmokeE2E:
             "sampleID",
             "proteinID",
             "BS_N_RUNS_REQUESTED",
+            "BS_N_RUNS_COMPLETED",
             "BS_N_OBSERVED",
             "PROTEIN_outlier_call_rate",
             "PROTEIN_FC_full",
@@ -345,3 +359,115 @@ class TestStabilitySmokeE2E:
         assert required.issubset(loaded.columns)
         assert len(loaded) >= 1
         assert not list(Path(config.out_dir).glob("_cohort_stability_tmp/**/additional_info.csv"))
+
+
+class TestStabilityBaselineIncludeAll:
+    def test_stability_baseline_includes_non_outliers(self, tmp_path):
+        intensities_path = tmp_path / "intensities.tsv"
+        _make_stability_intensities(intensities_path, n_samples=35, n_proteins=15)
+        config = _fast_stability_config(
+            tmp_path,
+            intensities_path,
+            report_all=False,
+            cohort_stability=True,
+            cohort_stability_n_runs=2,
+            cohort_stability_min_runs=2,
+            cohort_stability_drop_fraction=0.1,
+            cohort_stability_seed=3,
+        )
+        result, _, _, _ = run(config)
+        narrow = result.to_long_df(include_all=False)
+        full_baseline = result.to_long_df(include_all=True)
+        assert len(full_baseline) > len(narrow)
+        bs = run_cohort_stability(config, full_baseline)
+        assert bs is not None
+        in_full = bs[bs["in_full_run"]]
+        assert in_full["PROTEIN_FC_full"].notna().any()
+
+
+class TestSubsetInputs:
+    def test_parquet_input_writes_tsv_subset(self, tmp_path):
+        intensities_path = tmp_path / "intensities.parquet"
+        samples = _make_stability_intensities(
+            tmp_path / "intensities_src.tsv", n_samples=35, n_proteins=10
+        )
+        pd.read_csv(tmp_path / "intensities_src.tsv", sep="\t").to_parquet(
+            intensities_path, index=False
+        )
+        config = _fast_stability_config(tmp_path, intensities_path)
+        subset_dir = tmp_path / "subset"
+        out_int, _ = _subset_input_files(config, samples[:32], subset_dir)
+        assert out_int.endswith("intensities_subset.tsv")
+        assert Path(out_int).exists()
+        head = pd.read_csv(out_int, sep="\t", nrows=1)
+        assert "protein_ID" in head.columns
+
+    def test_mixed_delimiter_annotation(self, tmp_path):
+        samples = [f"sample_{i}" for i in range(35)]
+        int_tsv = tmp_path / "intensities.tsv"
+        _make_stability_intensities(int_tsv, n_samples=35, n_proteins=8)
+        anno_csv = tmp_path / "annotation.csv"
+        pd.DataFrame({"sampleID": samples, "batch": ["A"] * len(samples)}).to_csv(
+            anno_csv, index=False
+        )
+        config = _fast_stability_config(
+            tmp_path, int_tsv, sample_annotation=str(anno_csv)
+        )
+        out_path = _write_subset_annotation(config, samples[:32], tmp_path / "sub_a")
+        written = pd.read_csv(out_path)
+        assert len(written) == 32
+        assert list(written.columns) == ["sampleID", "batch"]
+
+        int_csv = tmp_path / "intensities.csv"
+        df = pd.read_csv(int_tsv, sep="\t")
+        df.to_csv(int_csv, index=False)
+        anno_tsv = tmp_path / "annotation.tsv"
+        pd.DataFrame({"sampleID": samples, "batch": ["B"] * len(samples)}).to_csv(
+            anno_tsv, sep="\t", index=False
+        )
+        config2 = _fast_stability_config(
+            tmp_path, int_csv, sample_annotation=str(anno_tsv)
+        )
+        out_path2 = _write_subset_annotation(config2, samples[:30], tmp_path / "sub_b")
+        written2 = pd.read_csv(out_path2, sep="\t")
+        assert len(written2) == 30
+
+
+class TestRuntimeBudgetDenominator:
+    def test_completed_runs_used_when_budget_stops_early(self):
+        baseline = pd.DataFrame(
+            {
+                "sampleID": ["s1"],
+                "proteinID": ["p1"],
+                "PROTEIN_outlier": [False],
+                "PROTEIN_FC": [1.0],
+                "PROTEIN_LOG2FC": [0.0],
+                "PROTEIN_ZSCORE": [0.0],
+                "PROTEIN_PVALUE": [0.5],
+                "PROTEIN_PADJ": [0.5],
+            }
+        )
+        iter_df = pd.DataFrame(
+            {
+                "sampleID": ["s1"],
+                "proteinID": ["p1"],
+                "PROTEIN_outlier": [True],
+                "PROTEIN_FC": [1.1],
+                "PROTEIN_LOG2FC": [0.1],
+                "PROTEIN_ZSCORE": [1.0],
+                "PROTEIN_PVALUE": [0.01],
+                "PROTEIN_PADJ": [0.05],
+            }
+        )
+        out = _summarize_stability(
+            [iter_df],
+            baseline,
+            n_runs_requested=10,
+            n_runs_completed=1,
+        )
+        row = out.iloc[0]
+        assert row["BS_N_RUNS_REQUESTED"] == 10
+        assert row["BS_N_RUNS_COMPLETED"] == 1
+        assert row["BS_N_OBSERVED"] == 1
+        assert row["BS_N_MISSING"] == 0
+        assert row["PROTEIN_outlier_call_rate_all_runs"] == 1.0

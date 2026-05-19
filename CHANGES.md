@@ -19,10 +19,20 @@
 
 - `Result.to_long_df()` for shared long-format construction; `Result.save(format="long")` uses it.
 
+### Fixed (cohort stability review)
+
+- Stability baseline always uses `to_long_df(include_all=True)` so full-cohort metrics are not dropped when `report_all: false`.
+- Baseline-only rows after outer merge get valid `BS_*` counters and call rates.
+- Temporary intensity subsets are always written as TSV (fixes parquet inputs).
+- Annotation subset files use the annotation file’s delimiter, not the intensity file’s.
+- `BS_N_RUNS_COMPLETED` added; missing/fraction denominators use completed runs, not requested.
+- When `cohort_stability_save_iteration_files` is true, each iteration saves wide and long outputs.
+- Stability iterations skip latent space and patient similarity export for speed.
+
 ### Notes
 
 - Preprocessing reruns each iteration; protein sets may differ (`BS_N_OBSERVED`).
-- `PROTEIN_outlier_call_rate` uses observed iterations as denominator.
+- `PROTEIN_outlier_call_rate` uses observed iterations as denominator; `PROTEIN_outlier_call_rate_all_runs` uses completed runs.
 - Stability iterations use isolated temp directories and do not load full-cohort `model.pt`.
 
 ---

@@ -150,10 +150,12 @@ def run_cohort_stability(
     if not config.cohort_stability_save_iteration_files and tmp_root.exists():
         shutil.rmtree(tmp_root, ignore_errors=True)
 
+    n_completed = len(iteration_summaries)
     summary = _summarize_stability(
         iteration_summaries=iteration_summaries,
         baseline_summary=baseline_summary,
         n_runs_requested=n_requested,
+        n_runs_completed=n_completed,
     )
     logger.info(
         "Finished cohort stability: %d/%d iterations, summary shape %s.",
@@ -218,9 +220,6 @@ def _subset_input_files(
 ) -> tuple[str, Optional[str]]:
     """Write temporary subset intensity and annotation files."""
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    src = Path(config.input_intensities)
-    suffix = src.suffix if src.suffix else ".tsv"
-    sep = "\t" if suffix == ".tsv" else ","
 
     data = read_protein_intensities(
         config.input_intensities,
@@ -245,13 +244,14 @@ def _subset_input_files(
     else:
         raise ValueError(f"Unsupported input_format: {config.input_format}")
 
-    out_int = tmp_dir / f"intensities_subset{suffix}"
-    out_df.to_csv(out_int, sep=sep, index=False)
+    # Always write TSV subsets so downstream readers use a known format.
+    out_int = tmp_dir / "intensities_subset.tsv"
+    out_df.to_csv(out_int, sep="\t", index=False)
 
     subset_annotation: Optional[str] = None
     if config.sample_annotation:
         subset_annotation = str(
-            _write_subset_annotation(config, retained_sample_ids, tmp_dir, sep)
+            _write_subset_annotation(config, retained_sample_ids, tmp_dir)
         )
 
     return str(out_int), subset_annotation
@@ -261,8 +261,8 @@ def _write_subset_annotation(
     config: ProtriderConfig,
     retained_sample_ids: List[str],
     tmp_dir: Path,
-    sep: str,
 ) -> Path:
+    tmp_dir.mkdir(parents=True, exist_ok=True)
     anno = read_annotation_file(config.sample_annotation)
     id_col = _detect_sample_id_column(anno, config.index_col)
 
@@ -282,9 +282,11 @@ def _write_subset_annotation(
         row_indices = [pos[sid] for sid in retained_sample_ids]
         subset = anno.iloc[row_indices].reset_index(drop=True)
 
-    src_suffix = Path(config.sample_annotation).suffix or ".tsv"
-    out_path = tmp_dir / f"annotation_subset{src_suffix}"
-    subset.to_csv(out_path, sep=sep, index=False)
+    anno_path = Path(config.sample_annotation)
+    anno_suffix = anno_path.suffix or ".tsv"
+    anno_sep = "\t" if anno_suffix == ".tsv" else ","
+    out_path = tmp_dir / f"annotation_subset{anno_suffix}"
+    subset.to_csv(out_path, sep=anno_sep, index=False)
     return out_path
 
 
@@ -325,6 +327,8 @@ def _run_single_stability_iteration(
         checkpoint_path=str(tmp_dir / "model.pt"),
         seed=iteration_seed,
         cohort_stability=False,
+        export_latent_space=False,
+        export_patient_similarity=False,
     )
 
     torch.manual_seed(iteration_seed)
@@ -333,6 +337,9 @@ def _run_single_stability_iteration(
     from protrider.pipeline import run as run_pipeline
 
     result, _, _, _ = run_pipeline(iter_config)
+    if config.cohort_stability_save_iteration_files:
+        result.save(iter_config.out_dir, format="wide")
+        result.save(iter_config.out_dir, format="long", include_all=True)
     long_df = result.to_long_df(include_all=True)
     return long_df[STABILITY_METRIC_COLUMNS].copy()
 
@@ -341,6 +348,7 @@ def _summarize_stability(
     iteration_summaries: List[pd.DataFrame],
     baseline_summary: pd.DataFrame,
     n_runs_requested: int,
+    n_runs_completed: int,
 ) -> pd.DataFrame:
     """Aggregate per-iteration summaries; outer union over sample-protein keys."""
     baseline_keys = _build_baseline_table(baseline_summary)
@@ -369,23 +377,8 @@ def _summarize_stability(
     stability = pd.concat(agg_parts, axis=1).reset_index()
 
     stability["BS_N_RUNS_REQUESTED"] = n_runs_requested
-    stability["BS_N_MISSING"] = (
-        stability["BS_N_RUNS_REQUESTED"] - stability["BS_N_OBSERVED"]
-    )
-    stability["BS_OBSERVED_FRACTION"] = (
-        stability["BS_N_OBSERVED"] / stability["BS_N_RUNS_REQUESTED"]
-    )
-    # Rate over observed iterations (main stability score for outlier calls)
-    stability["PROTEIN_outlier_call_rate"] = (
-        stability["PROTEIN_outlier_call_count"] / stability["BS_N_OBSERVED"]
-    )
-    stability.loc[stability["BS_N_OBSERVED"] == 0, "PROTEIN_outlier_call_rate"] = (
-        np.nan
-    )
-    # Rate over all requested iterations (includes missing pairs as non-calls)
-    stability["PROTEIN_outlier_call_rate_all_runs"] = (
-        stability["PROTEIN_outlier_call_count"] / stability["BS_N_RUNS_REQUESTED"]
-    )
+    stability["BS_N_RUNS_COMPLETED"] = n_runs_completed
+    stability = _apply_bs_denominators(stability, n_runs_completed)
 
     merged = stability.merge(
         baseline_keys,
@@ -393,20 +386,35 @@ def _summarize_stability(
         how="outer",
     )
     merged["in_full_run"] = merged["in_full_run"].fillna(False).astype(bool)
+    merged["BS_N_RUNS_REQUESTED"] = (
+        merged["BS_N_RUNS_REQUESTED"].fillna(n_runs_requested).astype(int)
+    )
+    merged["BS_N_RUNS_COMPLETED"] = (
+        merged["BS_N_RUNS_COMPLETED"].fillna(n_runs_completed).astype(int)
+    )
+    merged["PROTEIN_outlier_call_count"] = (
+        merged["PROTEIN_outlier_call_count"].fillna(0).astype(int)
+    )
     merged["BS_N_OBSERVED"] = merged["BS_N_OBSERVED"].fillna(0).astype(int)
-    merged["BS_N_MISSING"] = merged["BS_N_RUNS_REQUESTED"] - merged["BS_N_OBSERVED"]
-    merged["BS_OBSERVED_FRACTION"] = (
-        merged["BS_N_OBSERVED"] / merged["BS_N_RUNS_REQUESTED"]
-    )
-    merged["PROTEIN_outlier_call_rate_all_runs"] = (
-        merged["PROTEIN_outlier_call_count"].fillna(0)
-        / merged["BS_N_RUNS_REQUESTED"]
-    )
-    merged.loc[
-        merged["BS_N_OBSERVED"] == 0, "PROTEIN_outlier_call_rate"
-    ] = np.nan
+    merged = _apply_bs_denominators(merged, n_runs_completed)
 
     return merged
+
+
+def _apply_bs_denominators(df: pd.DataFrame, n_runs_completed: int) -> pd.DataFrame:
+    """Compute BS counters and call rates using completed (not requested) runs."""
+    out = df.copy()
+    out["BS_N_MISSING"] = out["BS_N_RUNS_COMPLETED"] - out["BS_N_OBSERVED"]
+    out["BS_OBSERVED_FRACTION"] = out["BS_N_OBSERVED"] / out["BS_N_RUNS_COMPLETED"]
+    out["PROTEIN_outlier_call_rate"] = (
+        out["PROTEIN_outlier_call_count"] / out["BS_N_OBSERVED"]
+    )
+    out.loc[out["BS_N_OBSERVED"] == 0, "PROTEIN_outlier_call_rate"] = np.nan
+    # Denominator: completed runs (pair may be absent in some iterations)
+    out["PROTEIN_outlier_call_rate_all_runs"] = (
+        out["PROTEIN_outlier_call_count"] / out["BS_N_RUNS_COMPLETED"]
+    )
+    return out
 
 
 def _build_baseline_table(baseline_summary: pd.DataFrame) -> pd.DataFrame:

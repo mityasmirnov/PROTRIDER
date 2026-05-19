@@ -587,11 +587,13 @@ def run(config: ProtriderConfig) -> Tuple[Result, ModelInfo, FitParameters, Grid
                                    dis=config.pval_dist, n_jobs=config.n_jobs)
 
     pvals_adj = adjust_pvals(pvals, method=config.pval_adj)
-    latent_space = extract_latent_space(dataset, model, q)
+    latent_space = None
+    if config.export_latent_space:
+        latent_space = extract_latent_space(dataset, model, q)
     patient_similarity = None
-    if latent_space is not None:
+    if config.export_patient_similarity and latent_space is not None:
         patient_similarity = compute_patient_similarity(latent_space.samples)
-    else:
+    elif config.export_patient_similarity and latent_space is None:
         logger.warning("Skipping patient similarity: latent space not available")
     result = _format_results(dataset=dataset, df_out=df_out, df_res=df_res, df_presence=df_presence,
                              pvals=pvals, Z=Z, pvals_one_sided=pvals_one_sided, pvals_adj=pvals_adj,

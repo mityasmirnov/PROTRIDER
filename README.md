@@ -96,7 +96,7 @@ An example dataset is included under `sample_data/`.
 | `cohort_stability_min_samples` | Minimum retained samples per iteration (default: `30`) |
 | `cohort_stability_seed` | Seed for subsampling and per-iteration models (defaults to `seed`) |
 | `cohort_stability_require_oht` | Require `find_q_method: "OHT"` when stability is enabled (default: `true`) |
-| `cohort_stability_save_iteration_files` | Save per-iteration wide outputs for debugging (default: `false`) |
+| `cohort_stability_save_iteration_files` | Save per-iteration wide and long outputs under each temp iteration directory (default: `false`) |
 
 
 </details>
@@ -117,7 +117,7 @@ cohort_stability_min_samples: 30
 cohort_stability_seed: 42
 ```
 
-`BS_N_OBSERVED` / `BS_OBSERVED_FRACTION` reflect how often a sample–protein pair survived subsetting and preprocessing. **`PROTEIN_outlier_call_rate`** is the main outlier stability metric. FC quantiles describe effect-size stability.
+`BS_N_RUNS_REQUESTED` is the configured iteration count; `BS_N_RUNS_COMPLETED` is how many iterations actually ran (e.g. after a runtime budget). `BS_N_OBSERVED`, `BS_N_MISSING`, and `BS_OBSERVED_FRACTION` use **completed** runs as the denominator. **`PROTEIN_outlier_call_rate`** is outlier calls divided by observed iterations; **`PROTEIN_outlier_call_rate_all_runs`** uses completed runs. FC quantiles describe effect-size stability. The stability baseline always includes all sample–protein pairs from the full cohort, independent of `report_all`.
 
 Example: `PROTEIN_FC_full=0.50`, `PROTEIN_FC_q025=0.40`, `PROTEIN_FC_q975=0.60`, `PROTEIN_outlier_call_rate=0.87` means a ~50% FC in the full cohort, a 40–60% central interval under perturbation, and outlier calls in 87% of observed iterations.
 
