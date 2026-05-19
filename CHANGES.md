@@ -26,6 +26,10 @@
 - Config: `cohort_stability`, `cohort_stability_n_runs`, `cohort_stability_min_runs`, `cohort_stability_max_runtime_min`, `cohort_stability_drop_fraction`, `cohort_stability_min_samples`, `cohort_stability_seed`, `cohort_stability_require_oht`, `cohort_stability_save_iteration_files`.
 - Module `src/protrider/stability.py`.
 
+### Fixed
+
+- Co-outlier `_labels_to_subpopulation_names` now assigns one subpopulation label per sample (not one per cluster), so `cooutlier_patient_subpopulations.csv` and embedding plots no longer leave eligible samples with empty labels.
+
 ### Changed
 
 - `Result.to_long_df()` for shared long-format construction; `Result.save(format="long")` uses it.

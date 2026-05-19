@@ -432,6 +432,48 @@ class TestSubsetInputs:
         written2 = pd.read_csv(out_path2, sep="\t")
         assert len(written2) == 30
 
+    def test_numeric_sample_ids_proteins_as_columns(self, tmp_path):
+        rng = np.random.default_rng(0)
+        n_samples, n_proteins = 35, 8
+        sample_ids = list(range(100, 100 + n_samples))
+        proteins = [f"PROT_{i:03d}" for i in range(n_proteins)]
+        values = rng.uniform(50, 200, size=(n_samples, n_proteins)) * 1000.0
+        int_path = tmp_path / "intensities_numeric_samples.tsv"
+        df = pd.DataFrame(values, index=sample_ids, columns=proteins)
+        df.index.name = "sampleID"
+        df = df.reset_index()
+        df.to_csv(int_path, sep="\t", index=False)
+
+        config = _fast_stability_config(
+            tmp_path,
+            int_path,
+            input_format="proteins_as_columns",
+            index_col="sampleID",
+        )
+        retained = [str(sid) for sid in sample_ids[:32]]
+        out_int, _ = _subset_input_files(config, retained, tmp_path / "subset_num")
+        written = pd.read_csv(out_int, sep="\t")
+        assert len(written) == 32
+        assert set(written["sampleID"].astype(str)) == set(retained)
+
+        anno_path = tmp_path / "annotation_numeric.csv"
+        pd.DataFrame(
+            {"sampleID": sample_ids, "batch": ["A"] * n_samples}
+        ).to_csv(anno_path, index=False)
+        config_anno = _fast_stability_config(
+            tmp_path,
+            int_path,
+            input_format="proteins_as_columns",
+            index_col="sampleID",
+            sample_annotation=str(anno_path),
+        )
+        out_anno = _write_subset_annotation(
+            config_anno, retained, tmp_path / "anno_num"
+        )
+        anno_written = pd.read_csv(out_anno)
+        assert len(anno_written) == 32
+        assert set(anno_written["sampleID"].astype(str)) == set(retained)
+
 
 class TestRuntimeBudgetDenominator:
     def test_completed_runs_used_when_budget_stops_early(self):

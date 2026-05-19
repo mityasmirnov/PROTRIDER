@@ -50,13 +50,15 @@ def _agglomerative_precomputed(n_clusters: int) -> AgglomerativeClustering:
 
 
 def _labels_to_subpopulation_names(labels: np.ndarray) -> list[str]:
+    """Map cluster ids to stable subpopulation_1, subpopulation_2, ... by cluster size."""
     unique_labels = np.unique(labels)
     sizes = [(label, int(np.sum(labels == label))) for label in unique_labels]
     sizes.sort(key=lambda item: (-item[1], item[0]))
-    return [
-        f"subpopulation_{rank + 1}"
+    label_to_name = {
+        label: f"subpopulation_{rank + 1}"
         for rank, (label, _) in enumerate(sizes)
-    ]
+    }
+    return [label_to_name[label] for label in labels]
 
 
 def _compute_directional_jaccard(

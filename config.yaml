@@ -87,8 +87,12 @@ use_wandb: False
 # cohort_stability_require_oht: True
 # cohort_stability_save_iteration_files: False
 
-## Co-outlier patient stratification
+## Optional sample-level exports (latent, patient similarity, co-outlier)
+export_latent_space: True
+export_patient_similarity: True
 export_cooutlier_patient_similarity: True
+
+## Co-outlier patient stratification
 z_threshold: 3.0
 cooutlier_min_anomalies: 1
 cooutlier_max_clusters: 10

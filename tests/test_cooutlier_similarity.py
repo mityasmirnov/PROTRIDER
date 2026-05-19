@@ -81,6 +81,11 @@ class TestComputeCooutlierSimilarity:
         assert info["similarity_method"] == "directional_jaccard_same_direction"
         assert info["z_threshold"] == 3.0
 
+        eligible = subp[subp["eligible_for_clustering"].astype(bool)]
+        assert not eligible["subpopulation"].isna().any()
+        assert not (eligible["subpopulation"].astype(str).str.len() == 0).any()
+        assert eligible["subpopulation"].str.startswith("subpopulation_").all()
+
     def test_single_sample_returns_none(self):
         zscores = pd.DataFrame([[1.0]], index=["only"], columns=["p1"])
         assert compute_cooutlier_similarity(zscores) is None

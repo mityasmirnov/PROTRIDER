@@ -17,7 +17,7 @@ Have a look at our [paper](https://doi.org/10.1093/bioinformatics/btaf628) for i
 - [📖 Usage](#-usage)
   - [🗂️ Configuration](#️-configuration)
   - [📤 Output](#-output)
-  - [🧪 Test latent-space export locally](#-test-latent-space-export-locally)
+  - [🧪 Test locally](#-test-locally)
   - [▶️ Run](#️-run)
 - [📄 License](#-license)
 - [📚 Citation](#-citation)
@@ -291,28 +291,11 @@ Co-outlier export is enabled by default (`export_cooutlier_patient_similarity: t
 
 </details>
 
-### 🧪 Test latent-space export locally
+### 🧪 Test locally
 
-Use these steps to verify the feature on your machine **before** merging to `main` or opening a pull request.
+Use these steps to verify a checkout on your machine (clone or pull `main` on your fork).
 
-#### 1. Get the branch with latent export
-
-```bash
-git clone git@github.com:mityasmirnov/PROTRIDER.git
-cd PROTRIDER
-git checkout feature/latent-space-export
-```
-
-If you already have the repo:
-
-```bash
-cd PROTRIDER
-git fetch origin
-git checkout feature/latent-space-export
-git pull
-```
-
-#### 2. Install dependencies
+#### 1. Install dependencies
 
 With [uv](https://github.com/astral-sh/uv) (recommended; uses `uv.lock`):
 
@@ -328,19 +311,19 @@ pip install -e .
 protrider --help
 ```
 
-#### 3. Run automated tests
+#### 2. Run automated tests
 
 ```bash
 uv run pytest tests/ -q
 ```
 
-Optional: only the new latent tests:
+Optional focused runs:
 
 ```bash
-uv run pytest tests/test_latent_space.py -v
+uv run pytest tests/test_latent_space.py tests/test_patient_similarity.py tests/test_cooutlier_similarity.py -v
 ```
 
-#### 4. Run the CLI on sample data
+#### 3. Run the CLI on sample data
 
 From the repository root:
 
@@ -357,32 +340,21 @@ rm -f output/model.pt
 uv run protrider run --config config.yaml
 ```
 
-#### 5. Check wide-format outputs
+#### 4. Check wide-format outputs
 
-After the run, confirm `output/` contains the usual files **and** the new latent files:
+After the run, confirm `output/` contains core results and optional sample-level exports:
 
 ```bash
-ls -1 output/latent_*.csv
+ls -1 output/latent_*.csv output/patient_*.csv output/cooutlier_patient_*.csv 2>/dev/null
 ```
 
 Expected for the default linear config (`n_layers: 1` in `config.yaml`):
 
-- `output/latent_samples.csv`
-- `output/latent_protein_loadings_svd.csv`
-- `output/latent_protein_loadings_decoder.csv`
+- `output/latent_samples.csv`, `output/latent_protein_loadings_svd.csv`, `output/latent_protein_loadings_decoder.csv`
+- `output/patient_similarity.csv`, `output/patient_subpopulations.csv`, …
+- `output/cooutlier_patient_similarity.csv`, `output/cooutlier_patient_subpopulations.csv`, …
 
-Quick shape check (replace `q` with the value in `output/additional_info.csv`):
-
-```bash
-python - <<'PY'
-import pandas as pd
-q = int(pd.read_csv("output/additional_info.csv")["q"].iloc[0])
-Z = pd.read_csv("output/latent_samples.csv", index_col=0)
-print("latent_samples:", Z.shape, "expect (n_samples, q=", q, ")")
-PY
-```
-
-#### 6. Optional checks
+#### 5. Optional checks
 
 **Plots still work:**
 
@@ -398,13 +370,11 @@ import protrider
 config = protrider.load_config("config.yaml")
 result, model_info, fit_params, gs_result = protrider.run(config)
 assert result.latent_space is not None
-print(result.latent_space.samples.shape)
+assert result.cooutlier_similarity is not None
 result.save(config.out_dir, format="wide")
 ```
 
 **Multilayer** (`n_layers: 2` in config): expect `latent_samples.csv` and SVD loadings, but **no** `latent_protein_loadings_decoder.csv`.
-
-When you are satisfied, merge `feature/latent-space-export` into `main` on your fork (or open a PR to upstream).
 
 ### ▶️ Run
 

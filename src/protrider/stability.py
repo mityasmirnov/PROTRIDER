@@ -226,7 +226,8 @@ def _subset_input_files(
         config.index_col,
         config.input_format,
     )
-    missing = set(retained_sample_ids) - set(data.index.astype(str))
+    data.index = data.index.astype(str)
+    missing = set(retained_sample_ids) - set(data.index)
     if missing:
         raise ValueError(
             f"Retained sample IDs not found in intensity data: {sorted(missing)[:5]}..."
@@ -268,9 +269,8 @@ def _write_subset_annotation(
 
     if id_col is not None:
         indexed = anno.set_index(id_col)
-        missing = [
-            sid for sid in retained_sample_ids if sid not in indexed.index.astype(str)
-        ]
+        indexed.index = indexed.index.astype(str)
+        missing = [sid for sid in retained_sample_ids if sid not in indexed.index]
         if missing:
             raise ValueError(
                 f"Retained sample IDs not found in annotation '{id_col}': {missing[:5]}..."
