@@ -287,7 +287,7 @@ co.umap_coordinates
 co.tsne_coordinates
 ```
 
-Co-outlier export is enabled by default (`export_cooutlier_patient_similarity: true`) and does not change p-values, Z-scores, residuals, latent exports, or latent-based patient similarity files.
+Co-outlier export is enabled by default (`export_cooutlier_patient_similarity: true`) and does not change p-values, Z-scores, residuals, latent exports, or latent-based patient similarity files. On large cohorts, set `export_cooutlier_patient_similarity: false`, `export_patient_similarity: false`, and/or `export_latent_space: false` in `config.yaml` for faster production runs (cohort stability iterations already disable these automatically).
 
 </details>
 
