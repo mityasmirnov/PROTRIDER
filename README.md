@@ -17,6 +17,7 @@ Have a look at our [paper](https://doi.org/10.1093/bioinformatics/btaf628) for i
 - [📖 Usage](#-usage)
   - [🗂️ Configuration](#️-configuration)
   - [📤 Output](#-output)
+  - [🧪 Test latent-space export locally](#-test-latent-space-export-locally)
   - [▶️ Run](#️-run)
 - [📄 License](#-license)
 - [📚 Citation](#-citation)
@@ -56,36 +57,7 @@ protrider --help
 
 More information on conda environments can be found in [Conda's user guide](https://docs.conda.io/projects/conda/en/latest/user-guide/).
 
-### Install or update from this repository
-
-To use the latest development version from a local clone:
-
-```bash
-git clone https://github.com/gagneurlab/PROTRIDER.git
-cd PROTRIDER
-uv sync          # installs dependencies from uv.lock
-uv run protrider --help
-```
-
-Alternatively, use an editable pip install:
-
-```bash
-pip install -e .
-```
-
-To upgrade an existing installation to the current `main` branch:
-
-```bash
-pip install -U git+https://github.com/gagneurlab/PROTRIDER.git
-```
-
-Or, from your local clone after `git pull`:
-
-```bash
-pip install -U -e .
-```
-
-When working in this repository, prefer `uv run protrider ...` and `uv run pytest tests/ -q` so commands use the locked environment.
+To install this fork from GitHub (instead of PyPI), clone [mityasmirnov/PROTRIDER](https://github.com/mityasmirnov/PROTRIDER), then run `uv sync` or `pip install -e .` in the repository root.
 
 ## 📖 Usage
 
@@ -149,19 +121,24 @@ The key output file is `protrider_summary.csv`, which contains outlier calls wit
 
 </details>
 
-#### Latent-space outputs
+<details>
+<summary><b>Latent-space outputs</b></summary>
 
-PROTRIDER writes latent-space outputs when results are saved in wide format (including the default `protrider run --config config.yaml` workflow).
+PROTRIDER writes the files below when results are saved in **wide** format (including the default `protrider run --config config.yaml` workflow). They are **not** written for long format (`protrider_summary.csv` only).
 
-- **`latent_samples.csv`** contains the encoder latent representation with shape samples × q. Use this file for sample–sample similarity, clustering, or checking whether latent dimensions correlate with known technical or biological covariates.
-- **`latent_protein_loadings_svd.csv`** contains protein loadings from the SVD/OHT initialization with shape proteins × q (written when `dataset.Vt` is available).
-- **`latent_protein_loadings_decoder.csv`** contains learned decoder loadings for the standard linear model (`n_layers: 1`) with shape proteins × q. This file is not written for multilayer models because there is no single linear protein × latent loading matrix.
+| File | Shape | Meaning |
+|------|-------|---------|
+| `latent_samples.csv` | samples × q | Encoder latent embeddings (use for sample similarity / clustering) |
+| `latent_protein_loadings_svd.csv` | proteins × q | Protein loadings from SVD/OHT/PCA init (if `Vt` is available) |
+| `latent_protein_loadings_decoder.csv` | proteins × q | Linear decoder loadings (`n_layers: 1` only) |
 
-These files are different from **`residuals.csv`**. Residuals are observed minus predicted protein intensities and may remove both technical and biological signal captured by the model. Latent samples are extracted from the encoder before residualization.
+**Latent samples vs residuals:** `residuals.csv` is observed minus predicted intensities and may remove technical and biological signal the model already explained. `latent_samples.csv` is the encoder representation **before** residualization.
 
-**OHT with covariates:** the CLI logs a warning that this combination has not been fully evaluated; latent export still runs. SVD protein loadings are computed from the centered protein matrix only (covariates are not included in `perform_svd()`).
+**When decoder loadings are skipped:** multilayer models (`n_layers > 1`) or presence/absence mode — you still get `latent_samples.csv` (and SVD loadings when available).
 
-Example: sample cosine similarity from saved latents:
+**OHT with covariates:** the CLI logs a warning that this combination has not been fully evaluated; the run still completes. SVD loadings use the centered protein matrix only (not covariates).
+
+**Downstream example** (sample cosine similarity):
 
 ```python
 import pandas as pd
@@ -175,6 +152,123 @@ sim = pd.DataFrame(
 )
 sim.to_csv("output/sample_latent_cosine_similarity.csv")
 ```
+
+</details>
+
+### 🧪 Test latent-space export locally
+
+Use these steps to verify the feature on your machine **before** merging to `main` or opening a pull request.
+
+#### 1. Get the branch with latent export
+
+```bash
+git clone git@github.com:mityasmirnov/PROTRIDER.git
+cd PROTRIDER
+git checkout feature/latent-space-export
+```
+
+If you already have the repo:
+
+```bash
+cd PROTRIDER
+git fetch origin
+git checkout feature/latent-space-export
+git pull
+```
+
+#### 2. Install dependencies
+
+With [uv](https://github.com/astral-sh/uv) (recommended; uses `uv.lock`):
+
+```bash
+uv sync
+uv run protrider --help
+```
+
+Or with pip in your conda/venv:
+
+```bash
+pip install -e .
+protrider --help
+```
+
+#### 3. Run automated tests
+
+```bash
+uv run pytest tests/ -q
+```
+
+Optional: only the new latent tests:
+
+```bash
+uv run pytest tests/test_latent_space.py -v
+```
+
+#### 4. Run the CLI on sample data
+
+From the repository root:
+
+```bash
+uv run protrider run --config config.yaml
+```
+
+(`config.yaml` points at `sample_data/` and writes to `output/` by default.)
+
+To force a fresh model fit (ignore an old checkpoint):
+
+```bash
+rm -f output/model.pt
+uv run protrider run --config config.yaml
+```
+
+#### 5. Check wide-format outputs
+
+After the run, confirm `output/` contains the usual files **and** the new latent files:
+
+```bash
+ls -1 output/latent_*.csv
+```
+
+Expected for the default linear config (`n_layers: 1` in `config.yaml`):
+
+- `output/latent_samples.csv`
+- `output/latent_protein_loadings_svd.csv`
+- `output/latent_protein_loadings_decoder.csv`
+
+Quick shape check (replace `q` with the value in `output/additional_info.csv`):
+
+```bash
+python - <<'PY'
+import pandas as pd
+q = int(pd.read_csv("output/additional_info.csv")["q"].iloc[0])
+Z = pd.read_csv("output/latent_samples.csv", index_col=0)
+print("latent_samples:", Z.shape, "expect (n_samples, q=", q, ")")
+PY
+```
+
+#### 6. Optional checks
+
+**Plots still work:**
+
+```bash
+uv run protrider plot --config config.yaml all
+```
+
+**Python API:**
+
+```python
+import protrider
+
+config = protrider.load_config("config.yaml")
+result, model_info, fit_params, gs_result = protrider.run(config)
+assert result.latent_space is not None
+print(result.latent_space.samples.shape)
+result.save(config.out_dir, format="wide")
+```
+
+**Multilayer** (`n_layers: 2` in config): expect `latent_samples.csv` and SVD loadings, but **no** `latent_protein_loadings_decoder.csv`.
+
+When you are satisfied, merge `feature/latent-space-export` into `main` on your fork (or open a PR to upstream).
 
 ### ▶️ Run
 
