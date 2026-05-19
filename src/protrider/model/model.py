@@ -172,23 +172,23 @@ class ProtriderAutoencoder(nn.Module):
             return
 
         device = enc_layer.weight.device
-        Vt_q = torch.from_numpy(Vt_q).to(device) # (q, n_prots)
+        Vt_q = torch.from_numpy(Vt_q).to(device)  # (q, n_prots)
+        n_proteins = Vt_q.shape[1]
+        n_latent = Vt_q.shape[0]
 
         ## ENCODER weights: (q, n_prots + n_cov), bias: (q)
-        cov_enc_init = enc_layer.weight.data[:, 0:n_cov]
+        cov_enc_init = enc_layer.weight.data[:, n_proteins:]
         enc_layer.weight.data.copy_(
-            torch.cat([Vt_q.to(device),
-                       cov_enc_init.to(device)], axis=1)
+            torch.cat([Vt_q.to(device), cov_enc_init.to(device)], dim=1)
         )
 
         enc_layer.bias.data.copy_(-(Vt_q @ torch.from_numpy(prot_means).to(device).T).flatten())
 
         ## DECODER weights: (n_prots, q + n_cov), bias: (n_prot)
         dec_layer.bias.data.copy_(torch.from_numpy(prot_means).squeeze(0))
-        cov_dec_init = dec_layer.weight.data[:, 0:n_cov]
+        cov_dec_init = dec_layer.weight.data[:, n_latent:]
         dec_layer.weight.data.copy_(
-            torch.cat([Vt_q.T.to(device),
-                       cov_dec_init.to(device)], axis=1)
+            torch.cat([Vt_q.T.to(device), cov_dec_init.to(device)], dim=1)
         )      
 
 def mse_masked(x_hat, x, mask):

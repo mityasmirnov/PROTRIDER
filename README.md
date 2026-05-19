@@ -56,6 +56,37 @@ protrider --help
 
 More information on conda environments can be found in [Conda's user guide](https://docs.conda.io/projects/conda/en/latest/user-guide/).
 
+### Install or update from this repository
+
+To use the latest development version from a local clone:
+
+```bash
+git clone https://github.com/gagneurlab/PROTRIDER.git
+cd PROTRIDER
+uv sync          # installs dependencies from uv.lock
+uv run protrider --help
+```
+
+Alternatively, use an editable pip install:
+
+```bash
+pip install -e .
+```
+
+To upgrade an existing installation to the current `main` branch:
+
+```bash
+pip install -U git+https://github.com/gagneurlab/PROTRIDER.git
+```
+
+Or, from your local clone after `git pull`:
+
+```bash
+pip install -U -e .
+```
+
+When working in this repository, prefer `uv run protrider ...` and `uv run pytest tests/ -q` so commands use the locked environment.
+
 ## 📖 Usage
 
 ### 🗂️ Configuration
@@ -112,8 +143,38 @@ The key output file is `protrider_summary.csv`, which contains outlier calls wit
 | `train_losses.csv` | Per-epoch training loss |
 | `fit_parameters.csv` | Per-protein distribution fit parameters |
 | `config.yaml` | Saved configuration for reproducibility |
+| `latent_samples.csv` | Sample embeddings in the learned q-dimensional latent space; rows are samples, columns are latent dimensions |
+| `latent_protein_loadings_svd.csv` | Protein loadings from SVD/OHT/PCA initialization; rows are proteins, columns are latent dimensions |
+| `latent_protein_loadings_decoder.csv` | Learned decoder protein loadings for the linear autoencoder; rows are proteins, columns are latent dimensions |
 
 </details>
+
+#### Latent-space outputs
+
+PROTRIDER writes latent-space outputs when results are saved in wide format (including the default `protrider run --config config.yaml` workflow).
+
+- **`latent_samples.csv`** contains the encoder latent representation with shape samples × q. Use this file for sample–sample similarity, clustering, or checking whether latent dimensions correlate with known technical or biological covariates.
+- **`latent_protein_loadings_svd.csv`** contains protein loadings from the SVD/OHT initialization with shape proteins × q (written when `dataset.Vt` is available).
+- **`latent_protein_loadings_decoder.csv`** contains learned decoder loadings for the standard linear model (`n_layers: 1`) with shape proteins × q. This file is not written for multilayer models because there is no single linear protein × latent loading matrix.
+
+These files are different from **`residuals.csv`**. Residuals are observed minus predicted protein intensities and may remove both technical and biological signal captured by the model. Latent samples are extracted from the encoder before residualization.
+
+**OHT with covariates:** the CLI logs a warning that this combination has not been fully evaluated; latent export still runs. SVD protein loadings are computed from the centered protein matrix only (covariates are not included in `perform_svd()`).
+
+Example: sample cosine similarity from saved latents:
+
+```python
+import pandas as pd
+from sklearn.metrics.pairwise import cosine_similarity
+
+Z = pd.read_csv("output/latent_samples.csv", index_col=0)
+sim = pd.DataFrame(
+    cosine_similarity(Z),
+    index=Z.index,
+    columns=Z.index,
+)
+sim.to_csv("output/sample_latent_cosine_similarity.csv")
+```
 
 ### ▶️ Run
 
@@ -191,6 +252,11 @@ result.df_Z            # z-scores
 result.df_res          # residuals
 result.log2fc          # log2 fold changes
 result.fc              # fold changes
+
+# Latent-space objects (also written by result.save(..., format="wide"))
+Z_samples = result.latent_space.samples
+protein_loadings_svd = result.latent_space.protein_loadings_svd
+protein_loadings_decoder = result.latent_space.protein_loadings_decoder  # None for multilayer models
 ```
 
 </details>
