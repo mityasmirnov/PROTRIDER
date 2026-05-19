@@ -96,14 +96,14 @@ config_list$find_q_method <- "OHT"
 # Keep all sample-protein pairs in protrider_summary.csv.
 config_list$report_all <- TRUE
 
-# Stability analysis
+# Stability analysis (use integer scalars so YAML is not written as 30.0)
 config_list$cohort_stability <- TRUE
-config_list$cohort_stability_n_runs <- cohort_stability_n_runs
-config_list$cohort_stability_min_runs <- cohort_stability_min_runs
+config_list$cohort_stability_n_runs <- as.integer(cohort_stability_n_runs)
+config_list$cohort_stability_min_runs <- as.integer(cohort_stability_min_runs)
 config_list$cohort_stability_max_runtime_min <- NULL
 config_list$cohort_stability_drop_fraction <- cohort_stability_drop_fraction
-config_list$cohort_stability_min_samples <- cohort_stability_min_samples
-config_list$cohort_stability_seed <- cohort_stability_seed
+config_list$cohort_stability_min_samples <- as.integer(cohort_stability_min_samples)
+config_list$cohort_stability_seed <- as.integer(cohort_stability_seed)
 config_list$cohort_stability_require_oht <- TRUE
 config_list$cohort_stability_save_iteration_files <- FALSE
 

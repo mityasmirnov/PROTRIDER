@@ -263,6 +263,37 @@ def load_config(config_path: Union[str, Path]) -> ProtriderConfig:
     if config_dict is None:
         raise ValueError(f"Empty configuration file: {config_path}")
     
+    config_dict = _normalize_config_dict(config_dict)
+    
+    # Convert to ProtriderConfig, which will validate the fields
+    try:
+        config = ProtriderConfig(**config_dict)
+    except TypeError as e:
+        raise ValueError(f"Invalid configuration: {e}")
+    
+    return config
+
+
+def _coerce_int(value, field_name: str) -> int:
+    """Coerce YAML scalars like 30.0 or \"30\" to int for range() and dataclass fields."""
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be an integer, got boolean")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if value.is_integer():
+            return int(value)
+        raise ValueError(f"{field_name} must be a whole number, got {value}")
+    if isinstance(value, str):
+        as_float = float(value)
+        if as_float.is_integer():
+            return int(as_float)
+        raise ValueError(f"{field_name} must be a whole number, got {value!r}")
+    raise TypeError(f"{field_name} must be int-like, got {type(value).__name__}")
+
+
+def _normalize_config_dict(config_dict: dict) -> dict:
+    """Normalize types after yaml.safe_load (strings, floats-as-ints, yes/no booleans)."""
     # YAML may load scientific notation as strings depending on the parser/version.
     _float_keys = (
         'lr',
@@ -281,11 +312,57 @@ def load_config(config_path: Union[str, Path]) -> ProtriderConfig:
     for key in _float_keys:
         if key in config_dict and isinstance(config_dict[key], str):
             config_dict[key] = float(config_dict[key])
-    
-    # Convert to ProtriderConfig, which will validate the fields
-    try:
-        config = ProtriderConfig(**config_dict)
-    except TypeError as e:
-        raise ValueError(f"Invalid configuration: {e}")
-    
-    return config
+
+    _int_keys = (
+        "seed",
+        "gs_epochs",
+        "n_layers",
+        "n_epochs",
+        "patience",
+        "batch_size",
+        "h_dim",
+        "n_jobs",
+        "cohort_stability_n_runs",
+        "cohort_stability_min_runs",
+        "cohort_stability_min_samples",
+        "cohort_stability_seed",
+        "cooutlier_min_anomalies",
+        "cooutlier_max_clusters",
+        "cooutlier_min_samples_for_clustering",
+    )
+    for key in _int_keys:
+        if key in config_dict and config_dict[key] is not None:
+            config_dict[key] = _coerce_int(config_dict[key], key)
+
+    _bool_keys = (
+        "autoencoder_training",
+        "init_pca",
+        "presence_absence",
+        "common_degrees_freedom",
+        "report_all",
+        "verbose",
+        "use_wandb",
+        "cohort_stability",
+        "cohort_stability_require_oht",
+        "cohort_stability_save_iteration_files",
+        "export_latent_space",
+        "export_patient_similarity",
+        "export_cooutlier_patient_similarity",
+    )
+    for key in _bool_keys:
+        if key in config_dict and config_dict[key] is not None:
+            config_dict[key] = _coerce_bool(config_dict[key], key)
+
+    return config_dict
+
+
+def _coerce_bool(value, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "1", "on"}:
+            return True
+        if normalized in {"false", "no", "0", "off"}:
+            return False
+    raise ValueError(f"{field_name} must be a boolean, got {value!r}")

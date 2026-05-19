@@ -61,6 +61,18 @@ def build_run_config(
     config["export_patient_similarity"] = True
     config["export_cooutlier_patient_similarity"] = True
 
+    for key in (
+        "cohort_stability_n_runs",
+        "cohort_stability_min_runs",
+        "cohort_stability_min_samples",
+        "cohort_stability_seed",
+        "n_epochs",
+        "patience",
+        "n_jobs",
+    ):
+        if key in config and config[key] is not None:
+            config[key] = int(config[key])
+
     if smoke:
         config["n_epochs"] = 5
         config["patience"] = 3

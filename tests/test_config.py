@@ -264,6 +264,33 @@ class TestLoadConfig:
             assert config.min_delta == 1e-4
         finally:
             Path(temp_path).unlink()
+
+    def test_load_float_stability_run_counts_as_int(self):
+        """YAML/R may write cohort_stability_n_runs as 30.0; must not break range()."""
+        config_dict = {
+            "out_dir": "output",
+            "input_intensities": "data.csv",
+            "cohort_stability_n_runs": 30.0,
+            "cohort_stability_min_runs": 30.0,
+            "cohort_stability_min_samples": 30.0,
+            "cohort_stability_seed": 42.0,
+            "n_jobs": -1.0,
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_dict, f)
+            temp_path = f.name
+
+        try:
+            config = load_config(temp_path)
+            assert config.cohort_stability_n_runs == 30
+            assert isinstance(config.cohort_stability_n_runs, int)
+            assert config.cohort_stability_min_runs == 30
+            assert config.cohort_stability_min_samples == 30
+            assert config.cohort_stability_seed == 42
+            assert config.n_jobs == -1
+        finally:
+            Path(temp_path).unlink()
     
     def test_load_nonexistent_file(self):
         """Test that loading nonexistent file raises error."""
