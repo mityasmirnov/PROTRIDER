@@ -263,11 +263,24 @@ def load_config(config_path: Union[str, Path]) -> ProtriderConfig:
     if config_dict is None:
         raise ValueError(f"Empty configuration file: {config_path}")
     
-    # Handle scientific notation that gets loaded as strings
-    if 'lr' in config_dict and isinstance(config_dict['lr'], str):
-        config_dict['lr'] = float(config_dict['lr'])
-    if 'inj_freq' in config_dict and isinstance(config_dict['inj_freq'], str):
-        config_dict['inj_freq'] = float(config_dict['inj_freq'])
+    # YAML may load scientific notation as strings depending on the parser/version.
+    _float_keys = (
+        'lr',
+        'inj_freq',
+        'inj_mean',
+        'inj_sd',
+        'min_delta',
+        'lambda_presence_absence',
+        'pseudocount',
+        'outlier_threshold',
+        'max_allowed_NAs_per_protein',
+        'cohort_stability_drop_fraction',
+        'cohort_stability_max_runtime_min',
+        'z_threshold',
+    )
+    for key in _float_keys:
+        if key in config_dict and isinstance(config_dict[key], str):
+            config_dict[key] = float(config_dict[key])
     
     # Convert to ProtriderConfig, which will validate the fields
     try:

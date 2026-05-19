@@ -352,6 +352,7 @@ def _summarize_stability(
     n_runs_completed: int,
 ) -> pd.DataFrame:
     """Aggregate per-iteration summaries; outer union over sample-protein keys."""
+    logger.info("Aggregating cohort stability summaries...")
     baseline_keys = _build_baseline_table(baseline_summary)
 
     combined = pd.concat(iteration_summaries, ignore_index=True)
@@ -381,6 +382,7 @@ def _summarize_stability(
     stability["BS_N_RUNS_COMPLETED"] = n_runs_completed
     stability = _apply_bs_denominators(stability, n_runs_completed)
 
+    logger.info("Merging stability table with full-cohort baseline...")
     merged = stability.merge(
         baseline_keys,
         on=["sampleID", "proteinID"],
@@ -441,20 +443,27 @@ def _build_baseline_table(baseline_summary: pd.DataFrame) -> pd.DataFrame:
 
 
 def _metric_stability_table(series_group, prefix: str) -> pd.DataFrame:
-    def _std(s):
-        return np.nan if s.count() < 2 else s.std(ddof=1)
-
-    def _se(s):
-        n = s.count()
-        return np.nan if n < 2 else s.std(ddof=1) / np.sqrt(n)
-
-    return series_group.agg(
+    """Vectorized group stats (avoids per-group Python lambdas on large cohorts)."""
+    core = series_group.agg(
         **{
             f"{prefix}_mean": "mean",
             f"{prefix}_median": "median",
-            f"{prefix}_sd": _std,
-            f"{prefix}_se": _se,
-            f"{prefix}_q025": lambda s: s.quantile(0.025),
-            f"{prefix}_q975": lambda s: s.quantile(0.975),
+            f"{prefix}_sd": "std",
+            f"{prefix}_count": "count",
         }
+    )
+    core[f"{prefix}_se"] = core[f"{prefix}_sd"] / np.sqrt(core[f"{prefix}_count"])
+    core.loc[core[f"{prefix}_count"] < 2, [f"{prefix}_sd", f"{prefix}_se"]] = np.nan
+
+    quantiles = series_group.quantile([0.025, 0.975])
+    if isinstance(quantiles.index, pd.MultiIndex):
+        q025 = quantiles.xs(0.025, level=-1).rename(f"{prefix}_q025")
+        q975 = quantiles.xs(0.975, level=-1).rename(f"{prefix}_q975")
+    else:
+        # Single completed run: quantile level is not in the index.
+        q025 = quantiles.rename(f"{prefix}_q025")
+        q975 = quantiles.rename(f"{prefix}_q975")
+
+    return pd.concat([core, q025, q975], axis=1).drop(
+        columns=[f"{prefix}_count"], errors="ignore"
     )

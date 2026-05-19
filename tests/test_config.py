@@ -246,7 +246,8 @@ class TestLoadConfig:
             'out_dir': 'output',
             'input_intensities': 'data.csv',
             'lr': '1e-4',  # This can happen with YAML
-            'inj_freq': '1e-3'
+            'inj_freq': '1e-3',
+            'min_delta': '1e-4',
         }
         
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
@@ -259,6 +260,8 @@ class TestLoadConfig:
             assert config.lr == 1e-4
             assert isinstance(config.inj_freq, float)
             assert config.inj_freq == 1e-3
+            assert isinstance(config.min_delta, float)
+            assert config.min_delta == 1e-4
         finally:
             Path(temp_path).unlink()
     

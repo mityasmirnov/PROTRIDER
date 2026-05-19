@@ -1,0 +1,36 @@
+name: omicsDiagnosticsDev
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+
+dependencies:
+  - python=3.10
+  - pip
+
+  # Core scientific stack from conda-forge
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - pyarrow
+  - fastparquet
+  - llvm-openmp
+
+  # Install PyTorch from conda, not pip
+  - pytorch
+
+  # PROTRIDER dependencies
+  - click
+  - pyaml
+  - tqdm
+  - seaborn
+  - plotnine
+  - umap-learn
+
+  - pip:
+      - pulp==2.3.1
+      - optht
+      - pydeseq2
+      - mofapy2
+      - git+https://github.com/mityasmirnov/PROTRIDER.git@main

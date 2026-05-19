@@ -1,0 +1,234 @@
+# ============================================================
+# PROTRIDER dev config for omicsDiagnostics
+# ============================================================
+
+# Path to output directory to store result files.
+# Usually overwritten by the standalone R script.
+out_dir:
+
+# Input intensity file.
+# Format expected here: rows = proteins/genes, columns = samples.
+# Usually overwritten by the standalone R script.
+input_intensities:
+
+# Optional sample annotation file.
+# Usually overwritten by the standalone R script.
+sample_annotation:
+
+# Input matrix format.
+# omicsDiagnostics writes proteins/genes as rows and samples as columns.
+input_format: "proteins_as_rows"
+
+# Column name in the input file containing protein/gene IDs.
+index_col: "geneID"
+
+
+# ============================================================
+# Preprocessing params
+# ============================================================
+
+# Maximum allowed fraction of missing values per protein.
+max_allowed_NAs_per_protein: 0.3
+
+# Transformation to apply before model fitting.
+# Options: "log", "log2", "log10", or null if already log-transformed.
+log_func_name: "log"
+
+
+# ============================================================
+# Covariates
+# ============================================================
+
+# Names of columns in sample_annotation to pass as covariates.
+# Leave empty/null for no covariates.
+cov_used:
+  #- "gender"
+  #- "PROTEOMICS_BATCH"
+  #- "BATCH_RUN"
+  #- "INSTRUMENT"
+
+
+# ============================================================
+# Reproducibility
+# ============================================================
+
+seed: 42
+
+
+# ============================================================
+# Grid-search / injected-outlier params
+# Used only when find_q_method is "gs" or "bs".
+# For OHT these are mostly irrelevant.
+# ============================================================
+
+inj_freq: 1e-3
+inj_mean: 3
+inj_sd: 1.6
+gs_epochs: 100
+
+
+# ============================================================
+# Model params
+# ============================================================
+
+# When false, returns values after PCA initialization without AE training.
+autoencoder_training: True
+
+n_layers: 1
+n_epochs: 100
+lr: 1e-4
+batch_size:
+
+# For stability analysis use OHT.
+# Options: "OHT", "gs", "bs", or an integer as string.
+find_q_method: "OHT"
+
+# PCA initialization.
+init_pca: True
+
+# Hidden dimension, only for n_layers > 1.
+h_dim:
+
+# Early stopping.
+patience: 50
+min_delta: 0.0001
+
+
+# ============================================================
+# Presence/absence modelling
+# ============================================================
+
+presence_absence: False
+lambda_presence_absence: 0.5
+
+
+# ============================================================
+# Statistical params
+# ============================================================
+
+# Options: "gaussian", "t"
+pval_dist: "gaussian"
+
+# Options: "by", "bh"
+pval_adj: "by"
+
+# Options: "two-sided", "left", "right"
+pval_sided: "two-sided"
+
+# More stable for small datasets.
+common_degrees_freedom: True
+
+# For FC computation.
+pseudocount: 0.01
+
+
+# ============================================================
+# Reporting params
+# ============================================================
+
+outlier_threshold: 0.1
+
+# True = write all sample-gene pairs to protrider_summary.csv.
+# False = write only significant outliers.
+# For development and stability QC, keep True.
+report_all: True
+
+
+# ============================================================
+# Runtime params
+# ============================================================
+
+verbose: False
+
+# Use "gpu" on a CUDA machine. On Apple Silicon (M1/M2/M3) use "cpu".
+device: "cpu"
+
+# Number of parallel jobs. -1 = all available processors.
+n_jobs: -1
+
+
+# ============================================================
+# Model checkpoint
+# ============================================================
+
+# If null:
+#   PROTRIDER saves/loads from out_dir/model.pt.
+# For clean development runs, the R wrapper can set this to null and use a fresh out_dir.
+checkpoint_path:
+
+
+# ============================================================
+# Cohort stability analysis
+# ============================================================
+
+# Subsampling-based cohort stability analysis.
+# This is not classical bootstrap. It repeatedly removes random samples,
+# reruns full PROTRIDER OHT including preprocessing, and aggregates stability.
+cohort_stability: True
+
+# Start with 10 for testing. Use 100 for real analysis.
+cohort_stability_n_runs: 10
+
+# Minimum number of completed runs before optional runtime budget can stop.
+# For real analysis use 30.
+cohort_stability_min_runs: 10
+
+# Optional runtime budget in minutes.
+# null = complete all requested runs.
+cohort_stability_max_runtime_min:
+
+# Fraction of samples removed per stability iteration.
+cohort_stability_drop_fraction: 0.1
+
+# Stability mode is skipped if cohort size <= 30.
+# Each subsample also keeps at least this many samples.
+cohort_stability_min_samples: 30
+
+# Seed for subsampling and per-iteration model seeds.
+cohort_stability_seed: 42
+
+# Require OHT when cohort_stability is enabled.
+cohort_stability_require_oht: True
+
+# Debug only. If True, keeps per-iteration temporary files.
+cohort_stability_save_iteration_files: False
+
+
+# ============================================================
+# Optional sample-level exports
+# ============================================================
+
+# Export latent_samples.csv and protein loading files.
+export_latent_space: True
+
+# Export latent-space patient similarity / subpopulations / projections.
+export_patient_similarity: True
+
+# Export co-outlier patient similarity / subpopulations / projections.
+export_cooutlier_patient_similarity: True
+
+
+# ============================================================
+# Co-outlier patient stratification
+# ============================================================
+
+# Absolute Z-score threshold for defining up/down protein outliers.
+z_threshold: 3.0
+
+# Minimum number of aberrant proteins required for clustering/projection eligibility.
+cooutlier_min_anomalies: 1
+
+# Maximum number of clusters to evaluate.
+cooutlier_max_clusters: 10
+
+# Minimum eligible samples required for automatic clustering.
+cooutlier_min_samples_for_clustering: 4
+
+
+# ============================================================
+# Wandb logging
+# ============================================================
+
+use_wandb: False
+wandb_project: "protrider"
+wandb_name:
