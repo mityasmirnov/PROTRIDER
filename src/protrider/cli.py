@@ -88,6 +88,10 @@ def plot_all(ctx):
     plots.plot_patient_latent_pca(out_dir, plot_title)
     plots.plot_patient_latent_umap(out_dir, plot_title)
     plots.plot_patient_latent_tsne(out_dir, plot_title)
+    plots.plot_cooutlier_patient_similarity(out_dir, plot_title)
+    plots.plot_cooutlier_patient_pca(out_dir, plot_title)
+    plots.plot_cooutlier_patient_umap(out_dir, plot_title)
+    plots.plot_cooutlier_patient_tsne(out_dir, plot_title)
 
 
 @plot.command('pvals')
@@ -244,6 +248,62 @@ def plot_patient_latent_tsne(ctx):
     plot_title = ctx.obj['plot_title']
     logger.info("plotting patient latent t-SNE")
     plots.plot_patient_latent_tsne(out_dir, plot_title)
+
+
+@plot.command('cooutlier_patient_similarity')
+@click.pass_context
+def plot_cooutlier_patient_similarity(ctx):
+    """
+    Plot co-outlier patient similarity heatmap from directional Jaccard scores.
+    """
+    if ctx.obj is None:
+        return
+    out_dir = ctx.obj['out_dir']
+    plot_title = ctx.obj['plot_title']
+    logger.info("plotting co-outlier patient similarity heatmap")
+    plots.plot_cooutlier_patient_similarity(out_dir, plot_title)
+
+
+@plot.command('cooutlier_patient_pca')
+@click.pass_context
+def plot_cooutlier_patient_pca(ctx):
+    """
+    Plot PCA-like projection of co-outlier profiles colored by subpopulation.
+    """
+    if ctx.obj is None:
+        return
+    out_dir = ctx.obj['out_dir']
+    plot_title = ctx.obj['plot_title']
+    logger.info("plotting co-outlier patient PCA")
+    plots.plot_cooutlier_patient_pca(out_dir, plot_title)
+
+
+@plot.command('cooutlier_patient_umap')
+@click.pass_context
+def plot_cooutlier_patient_umap(ctx):
+    """
+    Plot UMAP projection of co-outlier similarity colored by subpopulation.
+    """
+    if ctx.obj is None:
+        return
+    out_dir = ctx.obj['out_dir']
+    plot_title = ctx.obj['plot_title']
+    logger.info("plotting co-outlier patient UMAP")
+    plots.plot_cooutlier_patient_umap(out_dir, plot_title)
+
+
+@plot.command('cooutlier_patient_tsne')
+@click.pass_context
+def plot_cooutlier_patient_tsne(ctx):
+    """
+    Plot t-SNE projection of co-outlier similarity colored by subpopulation.
+    """
+    if ctx.obj is None:
+        return
+    out_dir = ctx.obj['out_dir']
+    plot_title = ctx.obj['plot_title']
+    logger.info("plotting co-outlier patient t-SNE")
+    plots.plot_cooutlier_patient_tsne(out_dir, plot_title)
 
 
 @cli.command('run')

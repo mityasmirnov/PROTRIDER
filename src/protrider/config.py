@@ -105,6 +105,13 @@ class ProtriderConfig:
     # Optional exports (disabled in cohort stability iterations for speed)
     export_latent_space: bool = True
     export_patient_similarity: bool = True
+
+    # Co-outlier patient stratification
+    export_cooutlier_patient_similarity: bool = True
+    z_threshold: float = 3.0
+    cooutlier_min_anomalies: int = 1
+    cooutlier_max_clusters: int = 10
+    cooutlier_min_samples_for_clustering: int = 4
     
     def __post_init__(self):
         """Validate configuration after initialization and set computed fields."""
@@ -161,6 +168,15 @@ class ProtriderConfig:
                 "cohort_stability requires find_q_method='OHT' when "
                 "cohort_stability_require_oht is True"
             )
+
+        if self.z_threshold <= 0:
+            raise ValueError("z_threshold must be positive")
+        if self.cooutlier_min_anomalies < 0:
+            raise ValueError("cooutlier_min_anomalies must be >= 0")
+        if self.cooutlier_max_clusters < 2:
+            raise ValueError("cooutlier_max_clusters must be >= 2")
+        if self.cooutlier_min_samples_for_clustering < 2:
+            raise ValueError("cooutlier_min_samples_for_clustering must be >= 2")
         
         # Set log_func and base_fn based on log_func_name
         if self.log_func_name == "log2":

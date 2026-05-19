@@ -97,6 +97,11 @@ An example dataset is included under `sample_data/`.
 | `cohort_stability_seed` | Seed for subsampling and per-iteration models (defaults to `seed`) |
 | `cohort_stability_require_oht` | Require `find_q_method: "OHT"` when stability is enabled (default: `true`) |
 | `cohort_stability_save_iteration_files` | Save per-iteration wide and long outputs under each temp iteration directory (default: `false`) |
+| `export_cooutlier_patient_similarity` | Export co-outlier patient stratification tables (default: `true`) |
+| `z_threshold` | Absolute Z-score cutoff for up/down co-outlier bins (default: `3.0`) |
+| `cooutlier_min_anomalies` | Minimum aberrant proteins per sample for clustering/projections (default: `1`) |
+| `cooutlier_max_clusters` | Maximum *k* for agglomerative subpopulation search (default: `10`) |
+| `cooutlier_min_samples_for_clustering` | Minimum eligible samples for automatic *k* selection (default: `4`) |
 
 
 </details>
@@ -154,6 +159,13 @@ The key output file is `protrider_summary.csv`, which contains outlier calls wit
 | `patient_latent_umap.csv` | 2D UMAP coordinates of standardized latent embeddings (visualization only) |
 | `patient_latent_tsne.csv` | 2D t-SNE coordinates of standardized latent embeddings (visualization only) |
 | `patient_similarity_info.csv` | Single-row run metadata (sigma, *k*, silhouette, UMAP/t-SNE status) |
+| `cooutlier_patient_similarity.csv` | Sample × sample directional Jaccard similarity from extreme Z-scores |
+| `cooutlier_patient_subpopulations.csv` | Per-sample co-outlier subpopulation labels and clustering metadata |
+| `cooutlier_patient_burden.csv` | Per-sample counts of up/down/total aberrant proteins at `z_threshold` |
+| `cooutlier_patient_pca.csv` | 2D TruncatedSVD coordinates of sparse co-outlier profile (visualization) |
+| `cooutlier_patient_umap.csv` | 2D UMAP on co-outlier Jaccard distance (visualization) |
+| `cooutlier_patient_tsne.csv` | 2D t-SNE on co-outlier Jaccard distance (visualization) |
+| `cooutlier_patient_info.csv` | Single-row co-outlier run metadata |
 
 </details>
 
@@ -213,6 +225,10 @@ uv run protrider plot --config config.yaml patient_similarity
 uv run protrider plot --config config.yaml patient_latent_pca
 uv run protrider plot --config config.yaml patient_latent_umap
 uv run protrider plot --config config.yaml patient_latent_tsne
+uv run protrider plot --config config.yaml cooutlier_patient_similarity
+uv run protrider plot --config config.yaml cooutlier_patient_pca
+uv run protrider plot --config config.yaml cooutlier_patient_umap
+uv run protrider plot --config config.yaml cooutlier_patient_tsne
 ```
 
 **Python API:**
@@ -226,6 +242,52 @@ result.patient_similarity.tsne_coordinates # TSNE1, TSNE2, subpopulation
 ```
 
 Patient similarity is **not** computed from residuals or z-scores — only from `latent_samples`.
+
+</details>
+
+<details>
+<summary><b>Co-outlier patient stratification</b></summary>
+
+PROTRIDER can stratify patients by **shared extreme Z-score profiles**. The analysis binarizes in-memory `result.df_Z` (samples × proteins) into up- and down-regulated outlier sets using `z_threshold`. Pairwise similarity is a **directional Jaccard** index: two samples match only when the same protein is aberrant in the **same** direction (up/up or down/down). Non-aberrant proteins and opposite-direction pairs do not contribute, so the matrix reflects molecular error overlap rather than global proteomic background.
+
+**Latent vs co-outlier patient similarity:**
+
+| | Latent patient similarity | Co-outlier patient similarity |
+|--|---------------------------|-------------------------------|
+| Input | Learned latent embeddings | Extreme Z-scores only |
+| Captures | Broad sample structure before residualization | Shared up/down outlier patterns |
+| Use case | General cohort structure | Rare-disease–like patients with shared aberrant proteins |
+
+**Method (high level):**
+
+1. Sparse up/down indicators at `|Z| ≥ z_threshold`.
+2. Same-direction intersection counts via sparse matrix multiplication → directional Jaccard.
+3. Subpopulations: average-linkage agglomerative clustering on `1 − Jaccard` (not Ward; precomputed non-Euclidean distance). Choose *k* by silhouette score. Low-burden samples (`n_total < cooutlier_min_anomalies`) are labeled `unclassified_low_burden`.
+4. Projections: TruncatedSVD, UMAP, and t-SNE on the sparse co-outlier profile or precomputed distance (visualization only).
+
+**Plots** (optional; skipped with a warning if CSVs are missing):
+
+```bash
+uv run protrider plot --config config.yaml cooutlier_patient_similarity
+uv run protrider plot --config config.yaml cooutlier_patient_pca
+uv run protrider plot --config config.yaml cooutlier_patient_umap
+uv run protrider plot --config config.yaml cooutlier_patient_tsne
+```
+
+**Python API:**
+
+```python
+from protrider import compute_cooutlier_similarity
+
+co = compute_cooutlier_similarity(result.df_Z, z_threshold=3.0)
+co.similarity
+co.subpopulations
+co.pca_coordinates
+co.umap_coordinates
+co.tsne_coordinates
+```
+
+Co-outlier export is enabled by default (`export_cooutlier_patient_similarity: true`) and does not change p-values, Z-scores, residuals, latent exports, or latent-based patient similarity files.
 
 </details>
 
@@ -370,6 +432,10 @@ protrider plot --config config.yaml patient_similarity
 protrider plot --config config.yaml patient_latent_pca
 protrider plot --config config.yaml patient_latent_umap
 protrider plot --config config.yaml patient_latent_tsne
+protrider plot --config config.yaml cooutlier_patient_similarity
+protrider plot --config config.yaml cooutlier_patient_pca
+protrider plot --config config.yaml cooutlier_patient_umap
+protrider plot --config config.yaml cooutlier_patient_tsne
 ```
 
 <details>
@@ -434,6 +500,12 @@ protein_loadings_decoder = result.latent_space.protein_loadings_decoder  # None 
 patient_sim = result.patient_similarity.similarity
 patient_subpops = result.patient_similarity.subpopulations
 patient_pca = result.patient_similarity.pca_coordinates
+
+# Co-outlier stratification (from Z-scores; written when export_cooutlier_patient_similarity is true)
+co = result.cooutlier_similarity
+co_sim = co.similarity
+co_subpops = co.subpopulations
+co_pca = co.pca_coordinates
 ```
 
 </details>

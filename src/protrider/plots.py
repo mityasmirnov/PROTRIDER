@@ -17,6 +17,10 @@ __all__ = [
     "plot_expected_vs_observed",
     "plot_correlation_heatmap",
     "plot_patient_similarity",
+    "plot_cooutlier_patient_similarity",
+    "plot_cooutlier_patient_pca",
+    "plot_cooutlier_patient_umap",
+    "plot_cooutlier_patient_tsne",
     "plot_patient_latent_pca",
     "plot_patient_latent_umap",
     "plot_patient_latent_tsne",
@@ -610,4 +614,228 @@ def plot_patient_latent_tsne(
         png_name="patient_latent_tsne.png",
         default_title="Patient latent t-SNE",
         embedding_df=patient_latent_tsne,
+    )
+
+
+def plot_cooutlier_patient_similarity(
+    output_dir=None,
+    plot_title="",
+    patient_similarity=None,
+    patient_subpopulations=None,
+):
+    """
+    Plot co-outlier directional Jaccard similarity heatmap.
+
+    Reads cooutlier_patient_similarity.csv (and optional subpopulations) when
+    DataFrames are not passed. Returns None with a warning if inputs are missing.
+    """
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+
+    if patient_similarity is None:
+        if output_dir is None:
+            raise ValueError("Either output_dir or patient_similarity must be provided")
+        similarity_path = output_dir / "cooutlier_patient_similarity.csv"
+        if not similarity_path.exists():
+            logger.warning(
+                "Skipping co-outlier patient similarity plot: %s not found",
+                similarity_path,
+            )
+            return None
+        patient_similarity = pd.read_csv(similarity_path, index_col=0)
+
+    if patient_subpopulations is None and output_dir is not None:
+        subpop_path = output_dir / "cooutlier_patient_subpopulations.csv"
+        if subpop_path.exists():
+            patient_subpopulations = pd.read_csv(subpop_path)
+
+    if output_dir is None:
+        raise ValueError(
+            "output_dir is required to save the co-outlier patient similarity plot"
+        )
+
+    os.makedirs(output_dir / "plots", exist_ok=True)
+    similarity = patient_similarity.astype(float)
+
+    row_colors = None
+    lut = None
+    if (
+        patient_subpopulations is not None
+        and "subpopulation" in patient_subpopulations.columns
+    ):
+        subpop_map = patient_subpopulations.set_index("sampleID")["subpopulation"]
+        unique_vals = subpop_map.unique()
+        if len(unique_vals) <= 20:
+            palette = sns.color_palette("tab20", len(unique_vals))
+            lut = dict(zip(unique_vals, palette))
+            row_colors = [
+                lut[subpop_map.get(idx, unique_vals[0])] for idx in similarity.index
+            ]
+        else:
+            logger.warning(
+                "More than 20 subpopulations; skipping row color annotation on heatmap"
+            )
+
+    plot_obj = None
+    try:
+        if similarity.shape[0] >= 3:
+            plot_obj = sns.clustermap(
+                similarity,
+                cmap="mako",
+                vmin=0,
+                vmax=1,
+                row_colors=row_colors,
+                col_colors=row_colors,
+            )
+            if row_colors is not None and lut is not None:
+                from matplotlib.patches import Patch
+
+                legend_elements = [
+                    Patch(facecolor=color, label=str(val))
+                    for val, color in lut.items()
+                ]
+                plot_obj.ax_col_dendrogram.legend(
+                    handles=legend_elements,
+                    title="subpopulation",
+                    bbox_to_anchor=(1.15, 1),
+                    loc="upper left",
+                    frameon=True,
+                )
+            if plot_title:
+                plot_obj.fig.suptitle(plot_title)
+            plot_obj.savefig(
+                output_dir / "plots" / "cooutlier_patient_similarity_heatmap.png",
+                dpi=300,
+                bbox_inches="tight",
+            )
+        else:
+            raise ValueError("Too few samples for clustermap")
+    except Exception as exc:
+        logger.warning("Co-outlier clustermap failed (%s); falling back to heatmap", exc)
+        fig, ax = plt.subplots(figsize=(8, 6))
+        sns.heatmap(similarity, cmap="mako", vmin=0, vmax=1, ax=ax)
+        if plot_title:
+            ax.set_title(plot_title)
+        fig.savefig(
+            output_dir / "plots" / "cooutlier_patient_similarity_heatmap.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plot_obj = fig
+
+    plt.close("all")
+    logger.info(
+        "Saved co-outlier patient similarity heatmap to %s",
+        output_dir / "plots" / "cooutlier_patient_similarity_heatmap.png",
+    )
+    return plot_obj
+
+
+def _plot_cooutlier_embedding_from_csv(
+    output_dir,
+    plot_title: str,
+    fontsize: int,
+    csv_name: str,
+    x_col: str,
+    y_col: str,
+    png_name: str,
+    default_title: str,
+    embedding_df=None,
+):
+    if embedding_df is None:
+        if output_dir is None:
+            raise ValueError(
+                f"Either output_dir or embedding data must be provided for {csv_name}"
+            )
+        output_dir = Path(output_dir)
+        csv_path = output_dir / csv_name
+        if not csv_path.exists():
+            logger.warning("Skipping %s plot: %s not found", default_title, csv_path)
+            return None
+        embedding_df = pd.read_csv(csv_path)
+    elif output_dir is not None:
+        output_dir = Path(output_dir)
+
+    if output_dir is None:
+        raise ValueError(f"output_dir is required to save the {default_title} plot")
+
+    plot_df = embedding_df.dropna(subset=[x_col, y_col])
+    if len(plot_df) < 2:
+        logger.warning(
+            "Skipping %s plot: fewer than two samples with finite coordinates",
+            default_title,
+        )
+        return None
+
+    os.makedirs(output_dir / "plots", exist_ok=True)
+    output_path = output_dir / "plots" / png_name
+    p_out = _plot_patient_embedding(
+        plot_df,
+        x_col,
+        y_col,
+        output_path,
+        plot_title or default_title,
+        fontsize,
+    )
+    logger.info("Saved %s plot to %s", default_title, output_path)
+    return p_out
+
+
+def plot_cooutlier_patient_pca(
+    output_dir=None,
+    plot_title="",
+    fontsize=10,
+    cooutlier_patient_pca=None,
+):
+    """Scatter plot of co-outlier TruncatedSVD coordinates colored by subpopulation."""
+    return _plot_cooutlier_embedding_from_csv(
+        output_dir,
+        plot_title,
+        fontsize,
+        csv_name="cooutlier_patient_pca.csv",
+        x_col="PC1",
+        y_col="PC2",
+        png_name="cooutlier_patient_pca.png",
+        default_title="Co-outlier patient PCA",
+        embedding_df=cooutlier_patient_pca,
+    )
+
+
+def plot_cooutlier_patient_umap(
+    output_dir=None,
+    plot_title="",
+    fontsize=10,
+    cooutlier_patient_umap=None,
+):
+    """Scatter plot of co-outlier UMAP coordinates colored by subpopulation."""
+    return _plot_cooutlier_embedding_from_csv(
+        output_dir,
+        plot_title,
+        fontsize,
+        csv_name="cooutlier_patient_umap.csv",
+        x_col="UMAP1",
+        y_col="UMAP2",
+        png_name="cooutlier_patient_umap.png",
+        default_title="Co-outlier patient UMAP",
+        embedding_df=cooutlier_patient_umap,
+    )
+
+
+def plot_cooutlier_patient_tsne(
+    output_dir=None,
+    plot_title="",
+    fontsize=10,
+    cooutlier_patient_tsne=None,
+):
+    """Scatter plot of co-outlier t-SNE coordinates colored by subpopulation."""
+    return _plot_cooutlier_embedding_from_csv(
+        output_dir,
+        plot_title,
+        fontsize,
+        csv_name="cooutlier_patient_tsne.csv",
+        x_col="TSNE1",
+        y_col="TSNE2",
+        png_name="cooutlier_patient_tsne.png",
+        default_title="Co-outlier patient t-SNE",
+        embedding_df=cooutlier_patient_tsne,
     )

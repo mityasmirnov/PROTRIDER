@@ -329,6 +329,7 @@ def _run_single_stability_iteration(
         cohort_stability=False,
         export_latent_space=False,
         export_patient_similarity=False,
+        export_cooutlier_patient_similarity=False,
     )
 
     torch.manual_seed(iteration_seed)

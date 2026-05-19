@@ -12,6 +12,7 @@ from .stats import get_pvals, fit_residuals, adjust_pvals, FitParameters
 from .config import ProtriderConfig
 from .latent import LatentSpace, extract_latent_space
 from .patient_similarity import PatientSimilarity, compute_patient_similarity
+from .cooutlier_similarity import CoOutlierSimilarity, compute_cooutlier_similarity
 
 
 __all__ = ["run"]
@@ -113,6 +114,7 @@ class Result:
     outlier_threshold: float = 0.1  # Threshold for determining outliers
     latent_space: Optional[LatentSpace] = None
     patient_similarity: Optional[PatientSimilarity] = None
+    cooutlier_similarity: Optional[CoOutlierSimilarity] = None
 
     def to_long_df(self, include_all: bool = False) -> pd.DataFrame:
         """
@@ -229,6 +231,9 @@ class Result:
 
             if self.patient_similarity is not None:
                 self.patient_similarity.save(out_dir)
+
+            if self.cooutlier_similarity is not None:
+                self.cooutlier_similarity.save(out_dir)
 
         elif format == "long":
             logger.info('=== Saving results in long format ===')
@@ -601,6 +606,15 @@ def run(config: ProtriderConfig) -> Tuple[Result, ModelInfo, FitParameters, Grid
                              base_fn=config.base_fn, pval_dist=config.pval_dist,
                              latent_space=latent_space,
                              patient_similarity=patient_similarity)
+    if config.export_cooutlier_patient_similarity:
+        result.cooutlier_similarity = compute_cooutlier_similarity(
+            result.df_Z,
+            z_threshold=config.z_threshold,
+            min_anomalies=config.cooutlier_min_anomalies,
+            max_clusters=config.cooutlier_max_clusters,
+            min_samples_for_clustering=config.cooutlier_min_samples_for_clustering,
+            random_state=config.seed if config.seed is not None else 42,
+        )
     model_info = ModelInfo(q=np.array(q), learning_rate=np.array(config.lr),
                            n_epochs=np.array(config.n_epochs), test_loss=np.array(final_loss),
                            train_losses=np.array(train_losses))
