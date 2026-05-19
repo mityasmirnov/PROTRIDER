@@ -37,6 +37,7 @@ dependencies = [
     'pydeseq2',
     'scipy',
     'scikit-learn',
+    'umap-learn',
     'seaborn',
     'plotnine',
     'pyarrow',

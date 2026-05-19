@@ -58,6 +58,14 @@ class TestComputePatientSimilarity:
         assert pca is not None
         assert {"sampleID", "PC1", "PC2", "subpopulation"}.issubset(pca.columns)
 
+        umap = result.umap_coordinates
+        assert umap is not None
+        assert {"sampleID", "UMAP1", "UMAP2", "subpopulation"}.issubset(umap.columns)
+
+        tsne = result.tsne_coordinates
+        assert tsne is not None
+        assert {"sampleID", "TSNE1", "TSNE2", "subpopulation"}.issubset(tsne.columns)
+
         info = result.info
         assert info is not None
         assert info.loc[0, "status"] in {
@@ -86,6 +94,10 @@ class TestComputePatientSimilarity:
         assert result is not None
         assert np.allclose(result.similarity.values, np.eye(4))
         assert result.info.loc[0, "status"] == "degenerate_all_samples_identical"
+        assert result.umap_coordinates is None
+        assert result.tsne_coordinates is None
+        assert result.info.loc[0, "umap_status"] == "skipped_degenerate_latents"
+        assert result.info.loc[0, "tsne_status"] == "skipped_degenerate_latents"
 
     def test_save_writes_expected_files(self, tmp_path):
         latent_samples = _two_cluster_latent_samples()
@@ -96,8 +108,12 @@ class TestComputePatientSimilarity:
         assert (out_dir / "patient_similarity.csv").exists()
         assert (out_dir / "patient_subpopulations.csv").exists()
         assert (out_dir / "patient_latent_pca.csv").exists()
+        assert (out_dir / "patient_latent_umap.csv").exists()
+        assert (out_dir / "patient_latent_tsne.csv").exists()
         assert (out_dir / "patient_similarity_info.csv").exists()
         assert "patient_similarity" in written
+        assert "patient_latent_umap" in written
+        assert "patient_latent_tsne" in written
 
 
 class TestPatientSimilarityPipeline:
@@ -117,6 +133,8 @@ class TestPatientSimilarityPipeline:
         assert (out / "patient_similarity.csv").exists()
         assert (out / "patient_subpopulations.csv").exists()
         assert (out / "patient_latent_pca.csv").exists()
+        assert (out / "patient_latent_umap.csv").exists()
+        assert (out / "patient_latent_tsne.csv").exists()
         assert (out / "patient_similarity_info.csv").exists()
         assert (out / "latent_samples.csv").exists()
 

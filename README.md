@@ -151,7 +151,9 @@ The key output file is `protrider_summary.csv`, which contains outlier calls wit
 | `patient_similarity.csv` | Sample × sample RBF similarity matrix from standardized latent embeddings |
 | `patient_subpopulations.csv` | Per-sample subpopulation labels and clustering metadata |
 | `patient_latent_pca.csv` | 2D PCA coordinates of latent embeddings for visualization |
-| `patient_similarity_info.csv` | Single-row run metadata (sigma, *k*, silhouette, status) |
+| `patient_latent_umap.csv` | 2D UMAP coordinates of standardized latent embeddings (visualization only) |
+| `patient_latent_tsne.csv` | 2D t-SNE coordinates of standardized latent embeddings (visualization only) |
+| `patient_similarity_info.csv` | Single-row run metadata (sigma, *k*, silhouette, UMAP/t-SNE status) |
 
 </details>
 
@@ -199,13 +201,18 @@ When latent embeddings are available, PROTRIDER computes sample similarity and o
 1. Standardize latent dimensions (`StandardScaler`) so no single axis dominates distances.
 2. Pairwise Euclidean distances → RBF similarity \(S_{ij} = \exp(-D_{ij}^2 / (2\sigma^2))\) with \(\sigma\) = median of nonzero distances; diagonal set to 1.
 3. Subpopulations: Ward agglomerative clustering on standardized latents; choose *k* (2 … min(10, *n*−1)) by maximum silhouette score. Fewer than four samples → all assigned to `subpopulation_1`.
-4. PCA (2 components) on standardized latents for plotting (not UMAP).
+4. PCA (2 components) on standardized latents for plotting.
+5. UMAP and t-SNE (2 components each) on the same standardized latents for nonlinear views.
+
+PCA is deterministic and fast; UMAP and t-SNE provide nonlinear 2D views of the standardized latent space. UMAP uses `umap-learn`; t-SNE uses scikit-learn. These projections are for visualization only and do not affect patient similarity, clustering, p-values, residuals, or outlier calls.
 
 **Plots** (optional; skipped with a warning if CSVs are missing):
 
 ```bash
 uv run protrider plot --config config.yaml patient_similarity
 uv run protrider plot --config config.yaml patient_latent_pca
+uv run protrider plot --config config.yaml patient_latent_umap
+uv run protrider plot --config config.yaml patient_latent_tsne
 ```
 
 **Python API:**
@@ -214,6 +221,8 @@ uv run protrider plot --config config.yaml patient_latent_pca
 result.patient_similarity.similarity       # square DataFrame
 result.patient_similarity.subpopulations   # per-sample labels
 result.patient_similarity.pca_coordinates  # PC1, PC2, subpopulation
+result.patient_similarity.umap_coordinates # UMAP1, UMAP2, subpopulation
+result.patient_similarity.tsne_coordinates # TSNE1, TSNE2, subpopulation
 ```
 
 Patient similarity is **not** computed from residuals or z-scores — only from `latent_samples`.
@@ -359,6 +368,8 @@ protrider plot --config config.yaml encoding_dim
 protrider plot --config config.yaml expected_vs_observed --protein_id <protein_id>
 protrider plot --config config.yaml patient_similarity
 protrider plot --config config.yaml patient_latent_pca
+protrider plot --config config.yaml patient_latent_umap
+protrider plot --config config.yaml patient_latent_tsne
 ```
 
 <details>

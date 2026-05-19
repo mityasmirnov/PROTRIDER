@@ -86,6 +86,8 @@ def plot_all(ctx):
         out_dir, ctx.obj['sample_annotation'], plot_title, None)
     plots.plot_patient_similarity(out_dir, plot_title)
     plots.plot_patient_latent_pca(out_dir, plot_title)
+    plots.plot_patient_latent_umap(out_dir, plot_title)
+    plots.plot_patient_latent_tsne(out_dir, plot_title)
 
 
 @plot.command('pvals')
@@ -214,6 +216,34 @@ def plot_patient_latent_pca(ctx):
     plot_title = ctx.obj['plot_title']
     logger.info("plotting patient latent PCA")
     plots.plot_patient_latent_pca(out_dir, plot_title)
+
+
+@plot.command('patient_latent_umap')
+@click.pass_context
+def plot_patient_latent_umap(ctx):
+    """
+    Plot UMAP projection of latent embeddings colored by subpopulation.
+    """
+    if ctx.obj is None:
+        return
+    out_dir = ctx.obj['out_dir']
+    plot_title = ctx.obj['plot_title']
+    logger.info("plotting patient latent UMAP")
+    plots.plot_patient_latent_umap(out_dir, plot_title)
+
+
+@plot.command('patient_latent_tsne')
+@click.pass_context
+def plot_patient_latent_tsne(ctx):
+    """
+    Plot t-SNE projection of latent embeddings colored by subpopulation.
+    """
+    if ctx.obj is None:
+        return
+    out_dir = ctx.obj['out_dir']
+    plot_title = ctx.obj['plot_title']
+    logger.info("plotting patient latent t-SNE")
+    plots.plot_patient_latent_tsne(out_dir, plot_title)
 
 
 @cli.command('run')

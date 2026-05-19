@@ -42,6 +42,23 @@ def _write_patient_csvs(out_dir):
             "subpopulation": ["subpopulation_1"] * 3 + ["subpopulation_2"] * 3,
         }
     ).to_csv(out_dir / "patient_latent_pca.csv", index=False)
+    subpop = ["subpopulation_1"] * 3 + ["subpopulation_2"] * 3
+    pd.DataFrame(
+        {
+            "sampleID": samples,
+            "UMAP1": np.linspace(-2, 2, 6),
+            "UMAP2": np.linspace(2, -2, 6),
+            "subpopulation": subpop,
+        }
+    ).to_csv(out_dir / "patient_latent_umap.csv", index=False)
+    pd.DataFrame(
+        {
+            "sampleID": samples,
+            "TSNE1": np.linspace(-1.5, 1.5, 6),
+            "TSNE2": np.linspace(1.5, -1.5, 6),
+            "subpopulation": subpop,
+        }
+    ).to_csv(out_dir / "patient_latent_tsne.csv", index=False)
 
 
 def test_plot_patient_similarity_creates_png(tmp_path):
@@ -66,9 +83,33 @@ def test_plot_patient_latent_pca_creates_png(tmp_path):
     assert result is not None
 
 
+def test_plot_patient_latent_umap_creates_png(tmp_path):
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    _write_patient_csvs(out_dir)
+
+    result = plots.plot_patient_latent_umap(str(out_dir))
+    png = out_dir / "plots" / "patient_latent_umap.png"
+    assert png.exists()
+    assert result is not None
+
+
+def test_plot_patient_latent_tsne_creates_png(tmp_path):
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    _write_patient_csvs(out_dir)
+
+    result = plots.plot_patient_latent_tsne(str(out_dir))
+    png = out_dir / "plots" / "patient_latent_tsne.png"
+    assert png.exists()
+    assert result is not None
+
+
 def test_plots_return_none_when_files_missing(tmp_path):
     out_dir = tmp_path / "empty"
     out_dir.mkdir()
 
     assert plots.plot_patient_similarity(str(out_dir)) is None
     assert plots.plot_patient_latent_pca(str(out_dir)) is None
+    assert plots.plot_patient_latent_umap(str(out_dir)) is None
+    assert plots.plot_patient_latent_tsne(str(out_dir)) is None

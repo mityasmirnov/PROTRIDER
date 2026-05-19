@@ -20,6 +20,16 @@ SIMILARITY_METHOD = "rbf_median_sigma"
 DISTANCE_METRIC = "euclidean"
 LATENT_SCALING = "standard_scaler"
 CLUSTERING_METHOD = "ward_euclidean"
+UMAP_METHOD = "umap_euclidean"
+TSNE_METHOD = "sklearn_tsne_euclidean"
+
+
+def _subpopulation_labels(
+    sample_index: pd.Index,
+    subpopulations: pd.DataFrame,
+) -> list[str]:
+    subpopulation_map = subpopulations.set_index("sampleID")["subpopulation"]
+    return [subpopulation_map.get(sid, "subpopulation_1") for sid in sample_index]
 
 
 def _agglomerative_cluster(n_clusters: int) -> AgglomerativeClustering:
@@ -56,6 +66,8 @@ class PatientSimilarity:
     similarity: pd.DataFrame
     subpopulations: Optional[pd.DataFrame] = None
     pca_coordinates: Optional[pd.DataFrame] = None
+    umap_coordinates: Optional[pd.DataFrame] = None
+    tsne_coordinates: Optional[pd.DataFrame] = None
     info: Optional[pd.DataFrame] = None
 
     def save(self, out_dir: str) -> dict[str, Path]:
@@ -80,6 +92,18 @@ class PatientSimilarity:
             self.pca_coordinates.to_csv(pca_path, header=True, index=False)
             written["patient_latent_pca"] = pca_path
             logger.info("Saved patient latent PCA coordinates to %s", pca_path)
+
+        if self.umap_coordinates is not None:
+            umap_path = out_path / "patient_latent_umap.csv"
+            self.umap_coordinates.to_csv(umap_path, header=True, index=False)
+            written["patient_latent_umap"] = umap_path
+            logger.info("Saved patient latent UMAP coordinates to %s", umap_path)
+
+        if self.tsne_coordinates is not None:
+            tsne_path = out_path / "patient_latent_tsne.csv"
+            self.tsne_coordinates.to_csv(tsne_path, header=True, index=False)
+            written["patient_latent_tsne"] = tsne_path
+            logger.info("Saved patient latent t-SNE coordinates to %s", tsne_path)
 
         if self.info is not None:
             info_path = out_path / "patient_similarity_info.csv"
@@ -206,8 +230,7 @@ def _compute_pca_coordinates(
         pc1 = coords[:, 0]
         pc2 = coords[:, 1]
 
-    subpopulation_map = subpopulations.set_index("sampleID")["subpopulation"]
-    subpopulation = [subpopulation_map.get(sid, "subpopulation_1") for sid in sample_index]
+    subpopulation = _subpopulation_labels(sample_index, subpopulations)
 
     return pd.DataFrame(
         {
@@ -216,6 +239,102 @@ def _compute_pca_coordinates(
             "PC2": pc2,
             "subpopulation": subpopulation,
         }
+    )
+
+
+def _compute_umap_coordinates(
+    z_scaled: np.ndarray,
+    sample_index: pd.Index,
+    subpopulations: pd.DataFrame,
+    random_state: int = 42,
+) -> tuple[Optional[pd.DataFrame], str]:
+    """Project standardized latents to 2D with UMAP for visualization."""
+    n_samples = z_scaled.shape[0]
+    if n_samples < 3:
+        logger.warning(
+            "Skipping UMAP projection: need at least 3 samples (got %s)", n_samples
+        )
+        return None, "skipped_insufficient_samples"
+
+    try:
+        from umap import UMAP
+    except ImportError:
+        logger.warning("Skipping UMAP projection: umap-learn is not installed")
+        return None, "skipped_import"
+
+    n_neighbors = min(15, max(2, n_samples - 1))
+    try:
+        reducer = UMAP(
+            n_components=2,
+            n_neighbors=n_neighbors,
+            min_dist=0.1,
+            metric="euclidean",
+            random_state=random_state,
+        )
+        coords = reducer.fit_transform(z_scaled)
+    except Exception as exc:
+        logger.warning("Skipping UMAP projection after failure: %s", exc)
+        return None, "failed"
+
+    subpopulation = _subpopulation_labels(sample_index, subpopulations)
+    return (
+        pd.DataFrame(
+            {
+                "sampleID": list(sample_index),
+                "UMAP1": coords[:, 0],
+                "UMAP2": coords[:, 1],
+                "subpopulation": subpopulation,
+            }
+        ),
+        "ok",
+    )
+
+
+def _compute_tsne_coordinates(
+    z_scaled: np.ndarray,
+    sample_index: pd.Index,
+    subpopulations: pd.DataFrame,
+    random_state: int = 42,
+) -> tuple[Optional[pd.DataFrame], str]:
+    """Project standardized latents to 2D with t-SNE for visualization."""
+    from sklearn.manifold import TSNE
+
+    n_samples = z_scaled.shape[0]
+    if n_samples < 4:
+        logger.warning(
+            "Skipping t-SNE projection: need at least 4 samples (got %s)", n_samples
+        )
+        return None, "skipped_insufficient_samples"
+
+    perplexity = min(30, max(2, (n_samples - 1) // 3))
+    if perplexity >= n_samples:
+        perplexity = max(1, n_samples - 1)
+
+    try:
+        tsne = TSNE(
+            n_components=2,
+            perplexity=perplexity,
+            metric="euclidean",
+            init="pca",
+            learning_rate="auto",
+            random_state=random_state,
+        )
+        coords = tsne.fit_transform(z_scaled)
+    except Exception as exc:
+        logger.warning("Skipping t-SNE projection after failure: %s", exc)
+        return None, "failed"
+
+    subpopulation = _subpopulation_labels(sample_index, subpopulations)
+    return (
+        pd.DataFrame(
+            {
+                "sampleID": list(sample_index),
+                "TSNE1": coords[:, 0],
+                "TSNE2": coords[:, 1],
+                "subpopulation": subpopulation,
+            }
+        ),
+        "ok",
     )
 
 
@@ -284,6 +403,16 @@ def compute_patient_similarity(
         clustering_status=status,
     )
     pca_coordinates = _compute_pca_coordinates(z_scaled, z.index, subpopulations)
+    if nonzero.size == 0:
+        umap_coordinates, umap_status = None, "skipped_degenerate_latents"
+        tsne_coordinates, tsne_status = None, "skipped_degenerate_latents"
+    else:
+        umap_coordinates, umap_status = _compute_umap_coordinates(
+            z_scaled, z.index, subpopulations
+        )
+        tsne_coordinates, tsne_status = _compute_tsne_coordinates(
+            z_scaled, z.index, subpopulations
+        )
 
     info = pd.DataFrame(
         [
@@ -298,6 +427,10 @@ def compute_patient_similarity(
                 "selected_k": selected_k,
                 "selected_silhouette_score": selected_silhouette,
                 "status": cluster_status,
+                "umap_method": UMAP_METHOD if umap_coordinates is not None else np.nan,
+                "umap_status": umap_status,
+                "tsne_method": TSNE_METHOD if tsne_coordinates is not None else np.nan,
+                "tsne_status": tsne_status,
             }
         ]
     )
@@ -306,5 +439,7 @@ def compute_patient_similarity(
         similarity=similarity,
         subpopulations=subpopulations,
         pca_coordinates=pca_coordinates,
+        umap_coordinates=umap_coordinates,
+        tsne_coordinates=tsne_coordinates,
         info=info,
     )

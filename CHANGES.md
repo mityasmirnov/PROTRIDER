@@ -7,6 +7,9 @@
 - Patient similarity and subpopulation export from `latent_samples.csv`: RBF similarity matrix, Ward agglomerative clustering with silhouette-guided *k*, PCA coordinates, and metadata (`patient_similarity.csv`, `patient_subpopulations.csv`, `patient_latent_pca.csv`, `patient_similarity_info.csv`).
 - Module `src/protrider/patient_similarity.py`; `Result.patient_similarity` populated after latent extraction when latents are available.
 - Plots: `plot_patient_similarity`, `plot_patient_latent_pca`; CLI subcommands `patient_similarity` and `patient_latent_pca` (included in `plot all`, skipped with a warning if CSVs are missing).
+- UMAP and t-SNE latent-space patient projection outputs: `patient_latent_umap.csv`, `patient_latent_tsne.csv` (visualization only; failures log warnings and skip the corresponding file without breaking the pipeline).
+- Plot functions and CLI commands: `plot_patient_latent_umap`, `plot_patient_latent_tsne`, `protrider plot --config config.yaml patient_latent_umap`, `protrider plot --config config.yaml patient_latent_tsne`.
+- Dependency: `umap-learn` (import `from umap import UMAP`).
 
 ### Added (cohort stability)
 

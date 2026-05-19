@@ -18,6 +18,8 @@ __all__ = [
     "plot_correlation_heatmap",
     "plot_patient_similarity",
     "plot_patient_latent_pca",
+    "plot_patient_latent_umap",
+    "plot_patient_latent_tsne",
 ]
 
 logger = logging.getLogger(__name__)
@@ -475,6 +477,67 @@ def plot_patient_similarity(
     return plot_obj
 
 
+def _plot_patient_embedding(
+    df: pd.DataFrame,
+    x: str,
+    y: str,
+    output_path: Path,
+    title: str,
+    fontsize: int,
+) -> object:
+    """Shared plotnine scatter for patient latent 2D embeddings."""
+    plot_df = df.copy()
+    plot_df["subpopulation"] = plot_df["subpopulation"].astype(str)
+    p_out = (
+        pn.ggplot(plot_df, pn.aes(x=x, y=y, color="subpopulation"))
+        + pn.geom_point(size=3)
+        + pn.theme_bw(base_size=fontsize)
+        + pn.labs(x=x, y=y, color="Subpopulation", title=title)
+    )
+    p_out.save(output_path, width=6, height=4, units="in", dpi=300)
+    return p_out
+
+
+def _plot_patient_latent_embedding_from_csv(
+    output_dir,
+    plot_title: str,
+    fontsize: int,
+    csv_name: str,
+    x_col: str,
+    y_col: str,
+    png_name: str,
+    default_title: str,
+    embedding_df=None,
+):
+    if embedding_df is None:
+        if output_dir is None:
+            raise ValueError(f"Either output_dir or embedding data must be provided for {csv_name}")
+        output_dir = Path(output_dir)
+        csv_path = output_dir / csv_name
+        if not csv_path.exists():
+            logger.warning("Skipping %s plot: %s not found", default_title, csv_path)
+            return None
+        embedding_df = pd.read_csv(csv_path)
+    elif output_dir is not None:
+        output_dir = Path(output_dir)
+
+    if output_dir is None:
+        raise ValueError(f"output_dir is required to save the {default_title} plot")
+
+    os.makedirs(output_dir / "plots", exist_ok=True)
+    output_path = output_dir / "plots" / png_name
+    p_out = _plot_patient_embedding(
+        embedding_df,
+        x_col,
+        y_col,
+        output_path,
+        plot_title or default_title,
+        fontsize,
+    )
+    logger.info("Saved %s plot to %s", default_title, output_path)
+    return p_out
+
+
 def plot_patient_latent_pca(
     output_dir=None,
     plot_title="",
@@ -487,44 +550,64 @@ def plot_patient_latent_pca(
     Reads patient_latent_pca.csv when a DataFrame is not passed. Returns None
     with a warning if the file is missing.
     """
-    if patient_latent_pca is None:
-        if output_dir is None:
-            raise ValueError("Either output_dir or patient_latent_pca must be provided")
-        output_dir = Path(output_dir)
-        pca_path = output_dir / "patient_latent_pca.csv"
-        if not pca_path.exists():
-            logger.warning("Skipping patient latent PCA plot: %s not found", pca_path)
-            return None
-        patient_latent_pca = pd.read_csv(pca_path)
-    elif output_dir is not None:
-        output_dir = Path(output_dir)
-
-    if output_dir is None:
-        raise ValueError("output_dir is required to save the patient latent PCA plot")
-
-    os.makedirs(output_dir / "plots", exist_ok=True)
-    df = patient_latent_pca.copy()
-    df["subpopulation"] = df["subpopulation"].astype(str)
-
-    p_out = (
-        pn.ggplot(df, pn.aes(x="PC1", y="PC2", color="subpopulation"))
-        + pn.geom_point(size=3)
-        + pn.theme_bw(base_size=fontsize)
-        + pn.labs(
-            x="PC1",
-            y="PC2",
-            color="Subpopulation",
-            title=plot_title or "Patient latent PCA",
-        )
+    return _plot_patient_latent_embedding_from_csv(
+        output_dir,
+        plot_title,
+        fontsize,
+        csv_name="patient_latent_pca.csv",
+        x_col="PC1",
+        y_col="PC2",
+        png_name="patient_latent_pca.png",
+        default_title="Patient latent PCA",
+        embedding_df=patient_latent_pca,
     )
-    p_out.save(
-        output_dir / "plots" / "patient_latent_pca.png",
-        width=6,
-        height=4,
-        units="in",
-        dpi=300,
+
+
+def plot_patient_latent_umap(
+    output_dir=None,
+    plot_title="",
+    fontsize=10,
+    patient_latent_umap=None,
+):
+    """
+    Scatter plot of UMAP coordinates colored by inferred subpopulation.
+
+    Reads patient_latent_umap.csv when a DataFrame is not passed. Returns None
+    with a warning if the file is missing.
+    """
+    return _plot_patient_latent_embedding_from_csv(
+        output_dir,
+        plot_title,
+        fontsize,
+        csv_name="patient_latent_umap.csv",
+        x_col="UMAP1",
+        y_col="UMAP2",
+        png_name="patient_latent_umap.png",
+        default_title="Patient latent UMAP",
+        embedding_df=patient_latent_umap,
     )
-    logger.info(
-        "Saved patient latent PCA plot to %s", output_dir / "plots" / "patient_latent_pca.png"
+
+
+def plot_patient_latent_tsne(
+    output_dir=None,
+    plot_title="",
+    fontsize=10,
+    patient_latent_tsne=None,
+):
+    """
+    Scatter plot of t-SNE coordinates colored by inferred subpopulation.
+
+    Reads patient_latent_tsne.csv when a DataFrame is not passed. Returns None
+    with a warning if the file is missing.
+    """
+    return _plot_patient_latent_embedding_from_csv(
+        output_dir,
+        plot_title,
+        fontsize,
+        csv_name="patient_latent_tsne.csv",
+        x_col="TSNE1",
+        y_col="TSNE2",
+        png_name="patient_latent_tsne.png",
+        default_title="Patient latent t-SNE",
+        embedding_df=patient_latent_tsne,
     )
-    return p_out
