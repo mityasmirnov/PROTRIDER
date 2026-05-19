@@ -64,7 +64,7 @@ def _labels_to_subpopulation_names(labels: np.ndarray) -> list[str]:
 def _compute_directional_jaccard(
     zscores: pd.DataFrame,
     z_threshold: float,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, sparse.csr_matrix, sparse.csr_matrix]:
     """
     Directional Jaccard similarity from sparse up/down outlier indicators.
 
