@@ -73,3 +73,16 @@ device: 'gpu'
 use_wandb: False
 # wandb_project: 'protrider_test'
 # wandb_name: 'test_run'
+
+## Cohort stability analysis
+# Repeatedly remove random samples, rerun full PROTRIDER OHT including preprocessing,
+# and aggregate metric stability into protrider_summary_bs.csv (subsampling, not classical bootstrap).
+# cohort_stability: False
+# cohort_stability_n_runs: 100
+# cohort_stability_min_runs: 30
+# cohort_stability_max_runtime_min:
+# cohort_stability_drop_fraction: 0.1
+# cohort_stability_min_samples: 30
+# cohort_stability_seed:
+# cohort_stability_require_oht: True
+# cohort_stability_save_iteration_files: False

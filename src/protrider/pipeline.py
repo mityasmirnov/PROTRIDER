@@ -11,6 +11,7 @@ from .datasets import ProtriderDataset, ProtriderSubset
 from .stats import get_pvals, fit_residuals, adjust_pvals, FitParameters
 from .config import ProtriderConfig
 from .latent import LatentSpace, extract_latent_space
+from .patient_similarity import PatientSimilarity, compute_patient_similarity
 
 
 __all__ = ["run"]
@@ -111,6 +112,47 @@ class Result:
     pval_dist: str = 'gaussian'  # Distribution used for p-value computation
     outlier_threshold: float = 0.1  # Threshold for determining outliers
     latent_space: Optional[LatentSpace] = None
+    patient_similarity: Optional[PatientSimilarity] = None
+
+    def to_long_df(self, include_all: bool = False) -> pd.DataFrame:
+        """
+        Return the long-format PROTRIDER summary without writing it to disk.
+
+        Used by the standard result writer and cohort stability analysis so the
+        long-format schema stays consistent.
+
+        Args:
+            include_all: If False, only rows with PROTEIN_outlier==True are returned.
+
+        Returns:
+            Long-format DataFrame with sampleID, proteinID, and metric columns.
+        """
+        dfs_to_melt = {
+            'PROTEIN_LOG2INT': self.dataset.data,
+            'PROTEIN_EXPECTED_LOG2INT': self.df_out,
+            'PROTEIN_INT': self.dataset.raw_data,
+            'PROTEIN_ZSCORE': self.df_Z,
+            'PROTEIN_PVALUE': self.df_pvals,
+            'PROTEIN_PADJ': self.df_pvals_adj,
+            'PROTEIN_LOG2FC': self.log2fc,
+            'PROTEIN_FC': self.fc,
+        }
+
+        if self.df_presence is not None:
+            dfs_to_melt['pred_presence_probability'] = self.df_presence
+
+        combined = pd.concat(dfs_to_melt, axis=1)
+        df_res = combined.stack(future_stack=True).reset_index()
+        df_res.columns = ['sampleID', 'proteinID'] + list(dfs_to_melt.keys())
+
+        df_res['PROTEIN_outlier'] = df_res['PROTEIN_PADJ'].apply(
+            lambda x: x <= self.outlier_threshold)
+        df_res['pvalDistribution'] = self.pval_dist
+
+        if not include_all:
+            df_res = df_res.query('PROTEIN_outlier==True')
+
+        return df_res
 
     def save(self, out_dir: str, format: Literal["wide", "long"] = "wide", 
              include_all: bool = False):
@@ -185,41 +227,16 @@ class Result:
             if self.latent_space is not None:
                 self.latent_space.save(out_dir)
 
+            if self.patient_similarity is not None:
+                self.patient_similarity.save(out_dir)
+
         elif format == "long":
             logger.info('=== Saving results in long format ===')
-            
-            # Create a multi-index dataframe with all values
-            dfs_to_melt = {
-                'PROTEIN_LOG2INT': self.dataset.data,
-                'PROTEIN_EXPECTED_LOG2INT': self.df_out,
-                'PROTEIN_INT': self.dataset.raw_data,
-                'PROTEIN_ZSCORE': self.df_Z,
-                'PROTEIN_PVALUE': self.df_pvals,
-                'PROTEIN_PADJ': self.df_pvals_adj,
-                'PROTEIN_LOG2FC': self.log2fc,
-                'PROTEIN_FC': self.fc,
-            }
-            
-            if self.df_presence is not None:
-                dfs_to_melt['pred_presence_probability'] = self.df_presence
-            
-            # Concatenate all dataframes along columns with a multi-index
-            combined = pd.concat(dfs_to_melt, axis=1)
-            
-            # Melt once instead of multiple times (use future_stack=True for pandas 2.1+)
-            df_res = combined.stack(future_stack=True).reset_index()
-            df_res.columns = ['sampleID', 'proteinID'] + list(dfs_to_melt.keys())
-
-            df_res['PROTEIN_outlier'] = df_res['PROTEIN_PADJ'].apply(
-                lambda x: x <= self.outlier_threshold)
-            df_res['pvalDistribution'] = self.pval_dist
-
+            df_res = self.to_long_df(include_all=include_all)
             if not include_all:
-                original_len = df_res.shape[0]
-                df_res = df_res.query('PROTEIN_outlier==True')
                 logger.info(
-                    f'\t--- Removing non-significant sample-protein combinations. \n\tOriginal len: {original_len}, new len: {df_res.shape[0]}---')
-
+                    'Long summary filtered to outlier rows only (include_all=False).'
+                )
             out_p = f"{out_dir}/protrider_summary.csv"
             df_res.to_csv(out_p, index=None)
             logger.info(f'Saved output summary with shape {df_res.shape} to {out_p}')
@@ -571,11 +588,17 @@ def run(config: ProtriderConfig) -> Tuple[Result, ModelInfo, FitParameters, Grid
 
     pvals_adj = adjust_pvals(pvals, method=config.pval_adj)
     latent_space = extract_latent_space(dataset, model, q)
+    patient_similarity = None
+    if latent_space is not None:
+        patient_similarity = compute_patient_similarity(latent_space.samples)
+    else:
+        logger.warning("Skipping patient similarity: latent space not available")
     result = _format_results(dataset=dataset, df_out=df_out, df_res=df_res, df_presence=df_presence,
                              pvals=pvals, Z=Z, pvals_one_sided=pvals_one_sided, pvals_adj=pvals_adj,
                              pseudocount=config.pseudocount, outlier_threshold=config.outlier_threshold,
                              base_fn=config.base_fn, pval_dist=config.pval_dist,
-                             latent_space=latent_space)
+                             latent_space=latent_space,
+                             patient_similarity=patient_similarity)
     model_info = ModelInfo(q=np.array(q), learning_rate=np.array(config.lr),
                            n_epochs=np.array(config.n_epochs), test_loss=np.array(final_loss),
                            train_losses=np.array(train_losses))
@@ -603,7 +626,7 @@ def _inference(dataset: Union[ProtriderDataset, ProtriderSubset], model: Protrid
     return df_out, df_presence, loss, mse_loss, bce_loss
 
 
-def _format_results(df_out, df_res, df_presence, pvals, Z, pvals_one_sided, pvals_adj, dataset, pseudocount, outlier_threshold, base_fn, pval_dist, latent_space=None):
+def _format_results(df_out, df_res, df_presence, pvals, Z, pvals_one_sided, pvals_adj, dataset, pseudocount, outlier_threshold, base_fn, pval_dist, latent_space=None, patient_similarity=None):
     # Store as df
     df_pvals_adj = pd.DataFrame(pvals_adj)
     df_pvals_adj.columns = dataset.data.columns
@@ -641,4 +664,4 @@ def _format_results(df_out, df_res, df_presence, pvals, Z, pvals_one_sided, pval
     return Result(dataset=dataset, df_out=df_out, df_res=df_res, df_presence=df_presence, df_pvals=df_pvals, df_Z=df_Z,
                   df_pvals_one_sided=df_pvals_one_sided, df_pvals_adj=df_pvals_adj, log2fc=log2fc, fc=fc, n_out_median=n_out_median, n_out_max=n_out_max,
                   n_out_total=n_out_total, pval_dist=pval_dist, outlier_threshold=outlier_threshold,
-                  latent_space=latent_space)
+                  latent_space=latent_space, patient_similarity=patient_similarity)

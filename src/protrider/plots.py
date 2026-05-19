@@ -9,8 +9,16 @@ from pathlib import Path
 from .datasets import covariates
 
 
-__all__ = ["plot_pvals", "plot_encoding_dim", "plot_aberrant_per_sample", "plot_aberrant_per_sample",
-           "plot_training_loss", "plot_expected_vs_observed", "plot_correlation_heatmap"]
+__all__ = [
+    "plot_pvals",
+    "plot_encoding_dim",
+    "plot_aberrant_per_sample",
+    "plot_training_loss",
+    "plot_expected_vs_observed",
+    "plot_correlation_heatmap",
+    "plot_patient_similarity",
+    "plot_patient_latent_pca",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -359,4 +367,164 @@ def plot_expected_vs_observed(protein_id, output_dir=None, plot_title="", fontsi
         p_out.save(f"{output_dir}/plots/expected_vs_observed.png",
                    width=4, height=4, units='in', dpi=300)
     
+    return p_out
+
+
+def plot_patient_similarity(
+    output_dir=None,
+    plot_title="",
+    patient_similarity=None,
+    patient_subpopulations=None,
+):
+    """
+    Plot patient/sample similarity heatmap from latent-derived RBF similarities.
+
+    Reads patient_similarity.csv (and optional patient_subpopulations.csv) when
+    DataFrames are not passed. Returns None with a warning if inputs are missing.
+    """
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+
+    if patient_similarity is None:
+        if output_dir is None:
+            raise ValueError("Either output_dir or patient_similarity must be provided")
+        similarity_path = output_dir / "patient_similarity.csv"
+        if not similarity_path.exists():
+            logger.warning(
+                "Skipping patient similarity plot: %s not found", similarity_path
+            )
+            return None
+        patient_similarity = pd.read_csv(similarity_path, index_col=0)
+
+    if patient_subpopulations is None and output_dir is not None:
+        subpop_path = output_dir / "patient_subpopulations.csv"
+        if subpop_path.exists():
+            patient_subpopulations = pd.read_csv(subpop_path)
+
+    if output_dir is None:
+        raise ValueError("output_dir is required to save the patient similarity plot")
+
+    os.makedirs(output_dir / "plots", exist_ok=True)
+    similarity = patient_similarity.astype(float)
+
+    row_colors = None
+    lut = None
+    if patient_subpopulations is not None and "subpopulation" in patient_subpopulations.columns:
+        subpop_map = patient_subpopulations.set_index("sampleID")["subpopulation"]
+        unique_vals = subpop_map.unique()
+        if len(unique_vals) <= 20:
+            palette = sns.color_palette("tab20", len(unique_vals))
+            lut = dict(zip(unique_vals, palette))
+            row_colors = [lut[subpop_map.get(idx, unique_vals[0])] for idx in similarity.index]
+        else:
+            logger.warning(
+                "More than 20 subpopulations; skipping row color annotation on heatmap"
+            )
+
+    plot_obj = None
+    try:
+        if similarity.shape[0] >= 3:
+            plot_obj = sns.clustermap(
+                similarity,
+                cmap="mako",
+                vmin=0,
+                vmax=1,
+                row_colors=row_colors,
+                col_colors=row_colors,
+            )
+            if row_colors is not None and lut is not None:
+                from matplotlib.patches import Patch
+
+                legend_elements = [
+                    Patch(facecolor=color, label=str(val)) for val, color in lut.items()
+                ]
+                plot_obj.ax_col_dendrogram.legend(
+                    handles=legend_elements,
+                    title="subpopulation",
+                    bbox_to_anchor=(1.15, 1),
+                    loc="upper left",
+                    frameon=True,
+                )
+            if plot_title:
+                plot_obj.fig.suptitle(plot_title)
+            plot_obj.savefig(
+                output_dir / "plots" / "patient_similarity_heatmap.png",
+                dpi=300,
+                bbox_inches="tight",
+            )
+        else:
+            raise ValueError("Too few samples for clustermap")
+    except Exception as exc:
+        logger.warning("Clustermap failed (%s); falling back to heatmap", exc)
+        fig, ax = plt.subplots(figsize=(8, 6))
+        sns.heatmap(similarity, cmap="mako", vmin=0, vmax=1, ax=ax)
+        if plot_title:
+            ax.set_title(plot_title)
+        fig.savefig(
+            output_dir / "plots" / "patient_similarity_heatmap.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plot_obj = fig
+
+    plt.close("all")
+    logger.info(
+        "Saved patient similarity heatmap to %s",
+        output_dir / "plots" / "patient_similarity_heatmap.png",
+    )
+    return plot_obj
+
+
+def plot_patient_latent_pca(
+    output_dir=None,
+    plot_title="",
+    fontsize=10,
+    patient_latent_pca=None,
+):
+    """
+    Scatter plot of PCA coordinates colored by inferred subpopulation.
+
+    Reads patient_latent_pca.csv when a DataFrame is not passed. Returns None
+    with a warning if the file is missing.
+    """
+    if patient_latent_pca is None:
+        if output_dir is None:
+            raise ValueError("Either output_dir or patient_latent_pca must be provided")
+        output_dir = Path(output_dir)
+        pca_path = output_dir / "patient_latent_pca.csv"
+        if not pca_path.exists():
+            logger.warning("Skipping patient latent PCA plot: %s not found", pca_path)
+            return None
+        patient_latent_pca = pd.read_csv(pca_path)
+    elif output_dir is not None:
+        output_dir = Path(output_dir)
+
+    if output_dir is None:
+        raise ValueError("output_dir is required to save the patient latent PCA plot")
+
+    os.makedirs(output_dir / "plots", exist_ok=True)
+    df = patient_latent_pca.copy()
+    df["subpopulation"] = df["subpopulation"].astype(str)
+
+    p_out = (
+        pn.ggplot(df, pn.aes(x="PC1", y="PC2", color="subpopulation"))
+        + pn.geom_point(size=3)
+        + pn.theme_bw(base_size=fontsize)
+        + pn.labs(
+            x="PC1",
+            y="PC2",
+            color="Subpopulation",
+            title=plot_title or "Patient latent PCA",
+        )
+    )
+    p_out.save(
+        output_dir / "plots" / "patient_latent_pca.png",
+        width=6,
+        height=4,
+        units="in",
+        dpi=300,
+    )
+    logger.info(
+        "Saved patient latent PCA plot to %s", output_dir / "plots" / "patient_latent_pca.png"
+    )
     return p_out

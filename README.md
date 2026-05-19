@@ -88,9 +88,38 @@ An example dataset is included under `sample_data/`.
 | `pval_dist` | Distribution for p-value calculation: `t` (default) or `gaussian` |
 | `n_epochs` | Number of training epochs (default: `100`) |
 | `checkpoint_path` | Path to save/load model checkpoint (optional) |
+| `cohort_stability` | Run subsampling-based cohort stability analysis after the full cohort (default: `false`) |
+| `cohort_stability_n_runs` | Number of subsampling iterations (default: `100`) |
+| `cohort_stability_min_runs` | Minimum iterations before optional runtime budget may stop (default: `30`) |
+| `cohort_stability_max_runtime_min` | Optional runtime budget in minutes (`null` = all iterations) |
+| `cohort_stability_drop_fraction` | Fraction of samples removed per iteration (default: `0.1`) |
+| `cohort_stability_min_samples` | Minimum retained samples per iteration (default: `30`) |
+| `cohort_stability_seed` | Seed for subsampling and per-iteration models (defaults to `seed`) |
+| `cohort_stability_require_oht` | Require `find_q_method: "OHT"` when stability is enabled (default: `true`) |
+| `cohort_stability_save_iteration_files` | Save per-iteration wide outputs for debugging (default: `false`) |
 
 
 </details>
+
+### Cohort stability analysis
+
+Optional **cohort stability analysis** (subsampling stability) measures sensitivity of outlier calls and effect sizes to cohort composition. This is **not classical bootstrap** (no sampling with replacement). Each iteration **removes** random samples, reruns the full **OHT** pipeline **including preprocessing**, and aggregates results into `protrider_summary_bs.csv`.
+
+Requirements: `cohort_stability: true`, `find_q_method: "OHT"`, and **more than 30 samples**. The standard full-cohort run always completes first.
+
+```yaml
+find_q_method: "OHT"
+cohort_stability: true
+cohort_stability_n_runs: 100
+cohort_stability_min_runs: 30
+cohort_stability_drop_fraction: 0.1
+cohort_stability_min_samples: 30
+cohort_stability_seed: 42
+```
+
+`BS_N_OBSERVED` / `BS_OBSERVED_FRACTION` reflect how often a sample–protein pair survived subsetting and preprocessing. **`PROTEIN_outlier_call_rate`** is the main outlier stability metric. FC quantiles describe effect-size stability.
+
+Example: `PROTEIN_FC_full=0.50`, `PROTEIN_FC_q025=0.40`, `PROTEIN_FC_q975=0.60`, `PROTEIN_outlier_call_rate=0.87` means a ~50% FC in the full cohort, a 40–60% central interval under perturbation, and outlier calls in 87% of observed iterations.
 
 ### 📤 Output
 
@@ -102,6 +131,7 @@ The key output file is `protrider_summary.csv`, which contains outlier calls wit
 | File | Description |
 |------|-------------|
 | `protrider_summary.csv` | Long-format summary with outlier calls for all sample–protein pairs |
+| `protrider_summary_bs.csv` | Cohort stability summary when `cohort_stability: true` and cohort size &gt; 30 |
 | `pvals.csv` | Two-sided p-values (samples × proteins) |
 | `pvals_adj.csv` | BH/BY-adjusted p-values |
 | `pvals_one_sided.csv` | Left-sided p-values |
@@ -118,6 +148,10 @@ The key output file is `protrider_summary.csv`, which contains outlier calls wit
 | `latent_samples.csv` | Sample embeddings in the learned q-dimensional latent space; rows are samples, columns are latent dimensions |
 | `latent_protein_loadings_svd.csv` | Protein loadings from SVD/OHT/PCA initialization; rows are proteins, columns are latent dimensions |
 | `latent_protein_loadings_decoder.csv` | Learned decoder protein loadings for the linear autoencoder; rows are proteins, columns are latent dimensions |
+| `patient_similarity.csv` | Sample × sample RBF similarity matrix from standardized latent embeddings |
+| `patient_subpopulations.csv` | Per-sample subpopulation labels and clustering metadata |
+| `patient_latent_pca.csv` | 2D PCA coordinates of latent embeddings for visualization |
+| `patient_similarity_info.csv` | Single-row run metadata (sigma, *k*, silhouette, status) |
 
 </details>
 
@@ -152,6 +186,37 @@ sim = pd.DataFrame(
 )
 sim.to_csv("output/sample_latent_cosine_similarity.csv")
 ```
+
+</details>
+
+<details>
+<summary><b>Patient similarity and subpopulations</b></summary>
+
+When latent embeddings are available, PROTRIDER computes sample similarity and optional subpopulations automatically during `run()` and writes the patient files above in **wide** format.
+
+**Method (high level):**
+
+1. Standardize latent dimensions (`StandardScaler`) so no single axis dominates distances.
+2. Pairwise Euclidean distances → RBF similarity \(S_{ij} = \exp(-D_{ij}^2 / (2\sigma^2))\) with \(\sigma\) = median of nonzero distances; diagonal set to 1.
+3. Subpopulations: Ward agglomerative clustering on standardized latents; choose *k* (2 … min(10, *n*−1)) by maximum silhouette score. Fewer than four samples → all assigned to `subpopulation_1`.
+4. PCA (2 components) on standardized latents for plotting (not UMAP).
+
+**Plots** (optional; skipped with a warning if CSVs are missing):
+
+```bash
+uv run protrider plot --config config.yaml patient_similarity
+uv run protrider plot --config config.yaml patient_latent_pca
+```
+
+**Python API:**
+
+```python
+result.patient_similarity.similarity       # square DataFrame
+result.patient_similarity.subpopulations   # per-sample labels
+result.patient_similarity.pca_coordinates  # PC1, PC2, subpopulation
+```
+
+Patient similarity is **not** computed from residuals or z-scores — only from `latent_samples`.
 
 </details>
 
@@ -292,6 +357,8 @@ protrider plot --config config.yaml encoding_dim
 
 # Expected vs observed for a specific protein
 protrider plot --config config.yaml expected_vs_observed --protein_id <protein_id>
+protrider plot --config config.yaml patient_similarity
+protrider plot --config config.yaml patient_latent_pca
 ```
 
 <details>
@@ -351,6 +418,11 @@ result.fc              # fold changes
 Z_samples = result.latent_space.samples
 protein_loadings_svd = result.latent_space.protein_loadings_svd
 protein_loadings_decoder = result.latent_space.protein_loadings_decoder  # None for multilayer models
+
+# Patient similarity (when latent_space is available)
+patient_sim = result.patient_similarity.similarity
+patient_subpops = result.patient_similarity.subpopulations
+patient_pca = result.patient_similarity.pca_coordinates
 ```
 
 </details>

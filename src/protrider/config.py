@@ -90,6 +90,17 @@ class ProtriderConfig:
     # If path exists: load model from this path and skip training
     # If path doesn't exist: train and save to this path
     checkpoint_path: Optional[str] = None
+
+    # Cohort stability analysis (subsampling; not classical bootstrap)
+    cohort_stability: bool = False
+    cohort_stability_n_runs: int = 100
+    cohort_stability_min_runs: int = 30
+    cohort_stability_max_runtime_min: Optional[float] = None
+    cohort_stability_drop_fraction: float = 0.1
+    cohort_stability_min_samples: int = 30
+    cohort_stability_seed: Optional[int] = None
+    cohort_stability_require_oht: bool = True
+    cohort_stability_save_iteration_files: bool = False
     
     def __post_init__(self):
         """Validate configuration after initialization and set computed fields."""
@@ -115,6 +126,37 @@ class ProtriderConfig:
         if self.presence_absence and self.n_layers != 1:
             import warnings
             warnings.warn("Presence absence modeling is only validated with n_layers=1")
+
+        if self.cohort_stability_n_runs < 1:
+            raise ValueError("cohort_stability_n_runs must be at least 1")
+        if self.cohort_stability_min_runs < 1:
+            raise ValueError("cohort_stability_min_runs must be at least 1")
+        if self.cohort_stability_min_runs > self.cohort_stability_n_runs:
+            raise ValueError(
+                "cohort_stability_min_runs must be <= cohort_stability_n_runs"
+            )
+        if not (0 < self.cohort_stability_drop_fraction < 1):
+            raise ValueError(
+                "cohort_stability_drop_fraction must be between 0 and 1 (exclusive)"
+            )
+        if self.cohort_stability_min_samples < 2:
+            raise ValueError("cohort_stability_min_samples must be at least 2")
+        if (
+            self.cohort_stability_max_runtime_min is not None
+            and self.cohort_stability_max_runtime_min <= 0
+        ):
+            raise ValueError(
+                "cohort_stability_max_runtime_min must be None or positive"
+            )
+        if (
+            self.cohort_stability
+            and self.cohort_stability_require_oht
+            and self.find_q_method != "OHT"
+        ):
+            raise ValueError(
+                "cohort_stability requires find_q_method='OHT' when "
+                "cohort_stability_require_oht is True"
+            )
         
         # Set log_func and base_fn based on log_func_name
         if self.log_func_name == "log2":

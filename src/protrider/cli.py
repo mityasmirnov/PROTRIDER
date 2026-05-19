@@ -84,6 +84,8 @@ def plot_all(ctx):
     plots.plot_training_loss(out_dir, plot_title)
     plots.plot_correlation_heatmap(
         out_dir, ctx.obj['sample_annotation'], plot_title, None)
+    plots.plot_patient_similarity(out_dir, plot_title)
+    plots.plot_patient_latent_pca(out_dir, plot_title)
 
 
 @plot.command('pvals')
@@ -186,6 +188,34 @@ def plot_correlation_heatmap(ctx, covariate: str):
         out_dir, ctx.obj['sample_annotation'], plot_title, covariate_name=covariate)
 
 
+@plot.command('patient_similarity')
+@click.pass_context
+def plot_patient_similarity(ctx):
+    """
+    Plot patient/sample similarity heatmap from latent embeddings.
+    """
+    if ctx.obj is None:
+        return
+    out_dir = ctx.obj['out_dir']
+    plot_title = ctx.obj['plot_title']
+    logger.info("plotting patient similarity heatmap")
+    plots.plot_patient_similarity(out_dir, plot_title)
+
+
+@plot.command('patient_latent_pca')
+@click.pass_context
+def plot_patient_latent_pca(ctx):
+    """
+    Plot PCA projection of latent embeddings colored by subpopulation.
+    """
+    if ctx.obj is None:
+        return
+    out_dir = ctx.obj['out_dir']
+    plot_title = ctx.obj['plot_title']
+    logger.info("plotting patient latent PCA")
+    plots.plot_patient_latent_pca(out_dir, plot_title)
+
+
 @cli.command('run')
 @click.option(
     "--config",
@@ -260,6 +290,21 @@ def run(config_path: str):
     # Save grid search results if available
     if gs_results is not None:
         gs_results.to_csv(config.out_dir)
+
+    if config.cohort_stability:
+        from protrider.stability import run_cohort_stability
+
+        baseline_long = result.to_long_df(include_all=config.report_all)
+        logger.info("Starting cohort stability analysis (subsampling)...")
+        bs_summary = run_cohort_stability(config, baseline_long)
+        if bs_summary is not None:
+            out_bs = Path(config.out_dir) / "protrider_summary_bs.csv"
+            bs_summary.to_csv(out_bs, index=False)
+            logger.info(
+                "Wrote cohort stability summary shape %s to %s",
+                bs_summary.shape,
+                out_bs,
+            )
 
 if __name__ == '__main__':
     cli(obj={})

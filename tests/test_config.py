@@ -369,6 +369,19 @@ class TestConfigDefaults:
         assert config.pval_sided == "two-sided"
         assert config.pseudocount == 0.01
     
+    def test_cohort_stability_defaults(self):
+        """Test cohort stability parameter defaults."""
+        config = ProtriderConfig(
+            out_dir="output",
+            input_intensities="data.csv",
+        )
+        assert config.cohort_stability is False
+        assert config.cohort_stability_n_runs == 100
+        assert config.cohort_stability_min_runs == 30
+        assert config.cohort_stability_drop_fraction == 0.1
+        assert config.cohort_stability_min_samples == 30
+        assert config.cohort_stability_require_oht is True
+
     def test_reporting_defaults(self):
         """Test reporting parameter defaults."""
         config = ProtriderConfig(

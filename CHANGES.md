@@ -1,3 +1,32 @@
+# Changes
+
+## Unreleased
+
+### Added
+
+- Patient similarity and subpopulation export from `latent_samples.csv`: RBF similarity matrix, Ward agglomerative clustering with silhouette-guided *k*, PCA coordinates, and metadata (`patient_similarity.csv`, `patient_subpopulations.csv`, `patient_latent_pca.csv`, `patient_similarity_info.csv`).
+- Module `src/protrider/patient_similarity.py`; `Result.patient_similarity` populated after latent extraction when latents are available.
+- Plots: `plot_patient_similarity`, `plot_patient_latent_pca`; CLI subcommands `patient_similarity` and `patient_latent_pca` (included in `plot all`, skipped with a warning if CSVs are missing).
+
+### Added (cohort stability)
+
+- Optional cohort stability analysis (subsampling / delete-d cohort perturbation, not classical bootstrap) for OHT runs.
+- `protrider_summary_bs.csv` aggregated stability summary.
+- Config: `cohort_stability`, `cohort_stability_n_runs`, `cohort_stability_min_runs`, `cohort_stability_max_runtime_min`, `cohort_stability_drop_fraction`, `cohort_stability_min_samples`, `cohort_stability_seed`, `cohort_stability_require_oht`, `cohort_stability_save_iteration_files`.
+- Module `src/protrider/stability.py`.
+
+### Changed
+
+- `Result.to_long_df()` for shared long-format construction; `Result.save(format="long")` uses it.
+
+### Notes
+
+- Preprocessing reruns each iteration; protein sets may differ (`BS_N_OBSERVED`).
+- `PROTEIN_outlier_call_rate` uses observed iterations as denominator.
+- Stability iterations use isolated temp directories and do not load full-cohort `model.pt`.
+
+---
+
 # Changes: latent-space export (feature branch)
 
 This document describes what was added or fixed on the `feature/latent-space-export` branch, **why** each change was made, and **how** it works at a high level. For hands-on verification, see the [Test latent-space export locally](README.md#-test-latent-space-export-locally) section in `README.md`.
