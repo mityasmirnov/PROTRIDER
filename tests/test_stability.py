@@ -159,6 +159,42 @@ class TestResultToLongDf:
 
 
 class TestSummarizeStability:
+    def test_single_iteration_quantiles_equal_observed_values(self):
+        baseline = pd.DataFrame(
+            {
+                "sampleID": ["s1"],
+                "proteinID": ["p1"],
+                "PROTEIN_outlier": [False],
+                "PROTEIN_FC": [1.0],
+                "PROTEIN_LOG2FC": [0.0],
+                "PROTEIN_ZSCORE": [0.0],
+                "PROTEIN_PVALUE": [0.5],
+                "PROTEIN_PADJ": [0.5],
+            }
+        )
+        iter_df = pd.DataFrame(
+            {
+                "sampleID": ["s1"],
+                "proteinID": ["p1"],
+                "PROTEIN_outlier": [True],
+                "PROTEIN_FC": [1.25],
+                "PROTEIN_LOG2FC": [0.25],
+                "PROTEIN_ZSCORE": [2.0],
+                "PROTEIN_PVALUE": [0.01],
+                "PROTEIN_PADJ": [0.02],
+            }
+        )
+
+        out = _summarize_stability(
+            [iter_df], baseline, n_runs_requested=1, n_runs_completed=1
+        )
+
+        row = out.iloc[0]
+        assert row["PROTEIN_FC_q025"] == pytest.approx(1.25)
+        assert row["PROTEIN_FC_q975"] == pytest.approx(1.25)
+        assert row["PROTEIN_LOG2FC_q025"] == pytest.approx(0.25)
+        assert row["PROTEIN_LOG2FC_q975"] == pytest.approx(0.25)
+
     def test_mismatched_proteins_outer_union(self):
         baseline = pd.DataFrame(
             {
@@ -243,6 +279,29 @@ class TestSkipSmallCohort:
         assert bs is None
         assert not (Path(config.out_dir) / "protrider_summary_bs.csv").exists()
         assert any("skipped" in r.message.lower() for r in caplog.records)
+
+    def test_skips_when_drop_fraction_cannot_remove_samples(self, tmp_path, caplog):
+        intensities_path = tmp_path / "intensities.tsv"
+        _make_stability_intensities(intensities_path, n_samples=31)
+        config = _fast_stability_config(
+            tmp_path,
+            intensities_path,
+            cohort_stability=True,
+            cohort_stability_n_runs=2,
+            cohort_stability_min_runs=1,
+            cohort_stability_drop_fraction=0.01,
+            cohort_stability_min_samples=31,
+        )
+        baseline = pd.DataFrame(columns=["sampleID", "proteinID"])
+
+        with caplog.at_level("WARNING"):
+            bs = run_cohort_stability(config, baseline)
+
+        assert bs is None
+        assert any(
+            "do not allow removing any samples" in r.message
+            for r in caplog.records
+        )
 
 
 class TestSubsamplePlanReproducibility:
@@ -386,6 +445,15 @@ class TestStabilityBaselineIncludeAll:
 
 
 class TestSubsetInputs:
+    def test_missing_retained_sample_id_raises(self, tmp_path):
+        intensities_path = tmp_path / "intensities.tsv"
+        samples = _make_stability_intensities(intensities_path, n_samples=35)
+        config = _fast_stability_config(tmp_path, intensities_path)
+        retained = samples[:31] + ["missing_sample"]
+
+        with pytest.raises(ValueError, match="Retained sample IDs not found"):
+            _subset_input_files(config, retained, tmp_path / "missing_subset")
+
     def test_parquet_input_writes_tsv_subset(self, tmp_path):
         intensities_path = tmp_path / "intensities.parquet"
         samples = _make_stability_intensities(
