@@ -513,3 +513,71 @@ class TestRuntimeBudgetDenominator:
         assert row["BS_N_OBSERVED"] == 1
         assert row["BS_N_MISSING"] == 0
         assert row["PROTEIN_outlier_call_rate_all_runs"] == 1.0
+
+
+class TestIterationFailureHandling:
+    def _metric_df(self, sample_id: str, protein_id: str, is_outlier: bool) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "sampleID": [sample_id],
+                "proteinID": [protein_id],
+                "PROTEIN_ZSCORE": [1.0],
+                "PROTEIN_PVALUE": [0.1],
+                "PROTEIN_PADJ": [0.1],
+                "PROTEIN_LOG2FC": [0.0],
+                "PROTEIN_FC": [1.0],
+                "PROTEIN_outlier": [is_outlier],
+            }
+        )
+
+    def test_failed_iterations_do_not_discard_successful_runs(self, tmp_path, caplog):
+        sample_ids = [f"s{i}" for i in range(35)]
+        config = ProtriderConfig(
+            out_dir=str(tmp_path / "out"),
+            input_intensities="unused.tsv",
+            cohort_stability_n_runs=3,
+            cohort_stability_min_runs=2,
+            cohort_stability_drop_fraction=0.1,
+            cohort_stability_min_samples=30,
+        )
+        baseline = self._metric_df("s0", "p0", False)
+        iter0 = self._metric_df("s0", "p0", False)
+        iter1 = self._metric_df("s1", "p0", True)
+
+        with (
+            patch("protrider.stability._read_sample_ids", return_value=sample_ids),
+            patch(
+                "protrider.stability._run_single_stability_iteration",
+                side_effect=[iter0, RuntimeError("transient GPU reset"), iter1],
+            ) as run_iteration,
+            caplog.at_level("ERROR"),
+        ):
+            out = run_cohort_stability(config, baseline)
+
+        assert run_iteration.call_count == 3
+        assert out is not None
+        assert set(out["BS_N_RUNS_COMPLETED"]) == {2}
+        assert any("iteration 1 failed" in record.message.lower() for record in caplog.records)
+
+    def test_raises_when_successful_iterations_below_minimum(self, tmp_path):
+        sample_ids = [f"s{i}" for i in range(35)]
+        config = ProtriderConfig(
+            out_dir=str(tmp_path / "out"),
+            input_intensities="unused.tsv",
+            cohort_stability_n_runs=2,
+            cohort_stability_min_runs=2,
+            cohort_stability_drop_fraction=0.1,
+            cohort_stability_min_samples=30,
+        )
+        baseline = self._metric_df("s0", "p0", False)
+        iter0 = self._metric_df("s0", "p0", False)
+
+        with (
+            patch("protrider.stability._read_sample_ids", return_value=sample_ids),
+            patch(
+                "protrider.stability._run_single_stability_iteration",
+                side_effect=[iter0, RuntimeError("transient GPU reset")],
+            ),
+            pytest.raises(RuntimeError, match="completed 1/2 required successful iterations"),
+        ):
+            run_cohort_stability(config, baseline)

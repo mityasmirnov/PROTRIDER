@@ -97,6 +97,7 @@ def run_cohort_stability(
     )
 
     iteration_summaries: List[pd.DataFrame] = []
+    iteration_failures: List[str] = []
     start_time = time.monotonic()
     completed = 0
     tmp_root = Path(config.out_dir) / "_cohort_stability_tmp"
@@ -123,11 +124,11 @@ def run_cohort_stability(
             )
             iteration_summaries.append(iter_summary)
             completed += 1
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "Cohort stability iteration %d failed.", iteration_index
             )
-            raise
+            iteration_failures.append(f"{iteration_index + 1}: {exc}")
         finally:
             if not config.cohort_stability_save_iteration_files and tmp_dir.exists():
                 shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -143,9 +144,17 @@ def run_cohort_stability(
             )
             break
 
-    if not iteration_summaries:
-        logger.warning("Cohort stability analysis produced no successful iterations.")
-        return None
+    if completed < config.cohort_stability_min_runs:
+        failure_summary = "; ".join(iteration_failures[:3])
+        if len(iteration_failures) > 3:
+            failure_summary += f"; ... ({len(iteration_failures)} total failures)"
+        if not failure_summary:
+            failure_summary = "no iteration failures were recorded"
+        raise RuntimeError(
+            "Cohort stability analysis completed "
+            f"{completed}/{config.cohort_stability_min_runs} required successful "
+            f"iterations ({n_requested} requested). Failures: {failure_summary}"
+        )
 
     if not config.cohort_stability_save_iteration_files and tmp_root.exists():
         shutil.rmtree(tmp_root, ignore_errors=True)
