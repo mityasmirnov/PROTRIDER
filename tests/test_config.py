@@ -189,6 +189,15 @@ class TestConfigValidation:
             find_q_method="gs"
         )
         assert config.find_q_method == "gs"
+
+    def test_valid_find_q_method_bs(self):
+        """Test that 'bs' is a valid find_q_method."""
+        config = ProtriderConfig(
+            out_dir="output",
+            input_intensities="data.csv",
+            find_q_method="bs"
+        )
+        assert config.find_q_method == "bs"
     
     def test_valid_find_q_method_integer(self):
         """Test that integer string is a valid find_q_method."""
@@ -291,6 +300,82 @@ class TestLoadConfig:
             assert config.n_jobs == -1
         finally:
             Path(temp_path).unlink()
+
+    def test_load_string_boolean_values(self, tmp_path):
+        """Quoted YAML booleans from hand-edited configs should normalize safely."""
+        path = tmp_path / "booleans.yaml"
+        path.write_text(
+            "\n".join(
+                [
+                    "out_dir: output",
+                    "input_intensities: data.csv",
+                    'cohort_stability: "yes"',
+                    'report_all: "no"',
+                    'verbose: "on"',
+                    'export_latent_space: "0"',
+                    'export_patient_similarity: "false"',
+                    'export_cooutlier_patient_similarity: "off"',
+                ]
+            )
+        )
+
+        config = load_config(path)
+
+        assert config.cohort_stability is True
+        assert config.report_all is False
+        assert config.verbose is True
+        assert config.export_latent_space is False
+        assert config.export_patient_similarity is False
+        assert config.export_cooutlier_patient_similarity is False
+
+    def test_load_string_stability_ints_and_runtime_budget(self, tmp_path):
+        """String scalars from YAML should become usable numeric stability settings."""
+        path = tmp_path / "stability_numbers.yaml"
+        path.write_text(
+            "\n".join(
+                [
+                    "out_dir: output",
+                    "input_intensities: data.csv",
+                    'cohort_stability_n_runs: "30"',
+                    'cohort_stability_min_runs: "10"',
+                    'cohort_stability_min_samples: "31"',
+                    'cohort_stability_max_runtime_min: "45"',
+                ]
+            )
+        )
+
+        config = load_config(path)
+
+        assert config.cohort_stability_n_runs == 30
+        assert isinstance(config.cohort_stability_n_runs, int)
+        assert config.cohort_stability_min_runs == 10
+        assert config.cohort_stability_min_samples == 31
+        assert config.cohort_stability_max_runtime_min == 45.0
+        assert isinstance(config.cohort_stability_max_runtime_min, float)
+
+    @pytest.mark.parametrize(
+        "bad_value",
+        [
+            "true",
+            "30.5",
+            '"30.5"',
+        ],
+    )
+    def test_load_rejects_non_integral_stability_counts(self, tmp_path, bad_value):
+        """Stability run counts must not silently accept booleans or fractions."""
+        path = tmp_path / "bad_stability_count.yaml"
+        path.write_text(
+            "\n".join(
+                [
+                    "out_dir: output",
+                    "input_intensities: data.csv",
+                    f"cohort_stability_n_runs: {bad_value}",
+                ]
+            )
+        )
+
+        with pytest.raises(ValueError, match="cohort_stability_n_runs must"):
+            load_config(path)
     
     def test_load_nonexistent_file(self):
         """Test that loading nonexistent file raises error."""
