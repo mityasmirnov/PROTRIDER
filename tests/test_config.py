@@ -291,7 +291,63 @@ class TestLoadConfig:
             assert config.n_jobs == -1
         finally:
             Path(temp_path).unlink()
-    
+
+    def test_load_string_booleans_from_yaml(self, tmp_path):
+        """Quoted YAML booleans from external writers should retain bool semantics."""
+        config_dict = {
+            "out_dir": "output",
+            "input_intensities": "data.csv",
+            "cohort_stability": "yes",
+            "export_latent_space": "no",
+            "report_all": "on",
+            "verbose": "off",
+        }
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.safe_dump(config_dict))
+
+        config = load_config(config_path)
+
+        assert config.cohort_stability is True
+        assert config.export_latent_space is False
+        assert config.report_all is True
+        assert config.verbose is False
+
+    def test_load_string_stability_run_counts_as_int(self, tmp_path):
+        """Quoted YAML integer fields should not reach dataclass validation as strings."""
+        config_dict = {
+            "out_dir": "output",
+            "input_intensities": "data.csv",
+            "cohort_stability_n_runs": "30",
+            "cohort_stability_min_runs": "5",
+            "cohort_stability_min_samples": "30",
+            "cohort_stability_seed": "42.0",
+            "n_jobs": "-1",
+        }
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.safe_dump(config_dict))
+
+        config = load_config(config_path)
+
+        assert config.cohort_stability_n_runs == 30
+        assert isinstance(config.cohort_stability_n_runs, int)
+        assert config.cohort_stability_min_runs == 5
+        assert config.cohort_stability_min_samples == 30
+        assert config.cohort_stability_seed == 42
+        assert config.n_jobs == -1
+
+    def test_boolean_value_rejected_for_integer_field(self, tmp_path):
+        """YAML true/false must not be accepted as 1/0 for run-count settings."""
+        config_dict = {
+            "out_dir": "output",
+            "input_intensities": "data.csv",
+            "cohort_stability_n_runs": True,
+        }
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.safe_dump(config_dict))
+
+        with pytest.raises(ValueError, match="cohort_stability_n_runs"):
+            load_config(config_path)
+
     def test_load_nonexistent_file(self):
         """Test that loading nonexistent file raises error."""
         with pytest.raises(FileNotFoundError, match="Config file not found"):

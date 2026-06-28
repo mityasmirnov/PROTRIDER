@@ -14,6 +14,7 @@ from protrider.pipeline import Result
 from protrider.stability import (
     STABILITY_METRIC_COLUMNS,
     _generate_subsample_plan,
+    _metric_stability_table,
     _run_single_stability_iteration,
     _subset_input_files,
     _summarize_stability,
@@ -222,6 +223,48 @@ class TestSummarizeStability:
         row_p3 = out[(out["sampleID"] == "s1") & (out["proteinID"] == "p3")].iloc[0]
         assert row_p3["BS_N_OBSERVED"] == 1
         assert not row_p3["in_full_run"]
+
+    def test_metric_stability_table_single_observation_quantiles_and_uncertainty(self):
+        values = pd.DataFrame(
+            {
+                "sampleID": ["s1"],
+                "proteinID": ["p1"],
+                "PROTEIN_FC": [2.5],
+            }
+        )
+        grouped = values.groupby(["sampleID", "proteinID"], dropna=False)
+
+        out = _metric_stability_table(grouped["PROTEIN_FC"], "PROTEIN_FC")
+        row = out.loc[("s1", "p1")]
+
+        assert row["PROTEIN_FC_mean"] == pytest.approx(2.5)
+        assert row["PROTEIN_FC_median"] == pytest.approx(2.5)
+        assert row["PROTEIN_FC_q025"] == pytest.approx(2.5)
+        assert row["PROTEIN_FC_q975"] == pytest.approx(2.5)
+        assert np.isnan(row["PROTEIN_FC_sd"])
+        assert np.isnan(row["PROTEIN_FC_se"])
+
+    def test_metric_stability_table_multiple_observations_quantiles_and_uncertainty(self):
+        values = pd.DataFrame(
+            {
+                "sampleID": ["s1", "s1", "s1"],
+                "proteinID": ["p1", "p1", "p1"],
+                "PROTEIN_FC": [1.0, 2.0, 5.0],
+            }
+        )
+        grouped = values.groupby(["sampleID", "proteinID"], dropna=False)
+
+        out = _metric_stability_table(grouped["PROTEIN_FC"], "PROTEIN_FC")
+        row = out.loc[("s1", "p1")]
+
+        assert row["PROTEIN_FC_mean"] == pytest.approx(8.0 / 3.0)
+        assert row["PROTEIN_FC_median"] == pytest.approx(2.0)
+        assert row["PROTEIN_FC_q025"] == pytest.approx(1.05)
+        assert row["PROTEIN_FC_q975"] == pytest.approx(4.85)
+        assert row["PROTEIN_FC_sd"] == pytest.approx(np.std([1.0, 2.0, 5.0], ddof=1))
+        assert row["PROTEIN_FC_se"] == pytest.approx(
+            np.std([1.0, 2.0, 5.0], ddof=1) / np.sqrt(3)
+        )
 
 
 class TestSkipSmallCohort:
