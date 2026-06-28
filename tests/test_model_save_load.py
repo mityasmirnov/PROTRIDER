@@ -185,5 +185,25 @@ def test_default_checkpoint_behavior(temp_output_dir):
     assert model_info1.q == model_info2.q, "Should load from default location"
 
 
+def test_failed_checkpoint_load_retrains_model(temp_output_dir):
+    """A corrupt checkpoint must not make a fresh random model skip training."""
+    checkpoint_path = Path(temp_output_dir) / 'corrupt_model.pt'
+    checkpoint_path.write_bytes(b'not a torch checkpoint')
+
+    config = ProtriderConfig(
+        input_intensities='sample_data/protrider_sample_dataset.tsv',
+        sample_annotation='sample_data/sample_annotations.tsv',
+        out_dir=temp_output_dir,
+        checkpoint_path=str(checkpoint_path),
+        n_epochs=2,
+        device='cpu',
+        find_q_method='5'
+    )
+
+    _, model_info, *_ = run(config)
+
+    assert len(model_info.train_losses) > 0, "Fresh model should train after checkpoint load failure"
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
