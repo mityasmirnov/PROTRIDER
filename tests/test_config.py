@@ -291,6 +291,60 @@ class TestLoadConfig:
             assert config.n_jobs == -1
         finally:
             Path(temp_path).unlink()
+
+    def test_load_string_booleans_from_yaml(self):
+        """YAML/R configs may persist booleans as yes/no or 1/0 strings."""
+        config_dict = {
+            "out_dir": "output",
+            "input_intensities": "data.csv",
+            "autoencoder_training": "false",
+            "init_pca": "true",
+            "report_all": "no",
+            "verbose": "yes",
+            "cohort_stability": "on",
+            "cohort_stability_require_oht": "off",
+            "cohort_stability_save_iteration_files": "1",
+            "export_latent_space": "0",
+            "export_patient_similarity": "True",
+            "export_cooutlier_patient_similarity": "False",
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_dict, f)
+            temp_path = f.name
+
+        try:
+            config = load_config(temp_path)
+            assert config.autoencoder_training is False
+            assert config.init_pca is True
+            assert config.report_all is False
+            assert config.verbose is True
+            assert config.cohort_stability is True
+            assert config.cohort_stability_require_oht is False
+            assert config.cohort_stability_save_iteration_files is True
+            assert config.export_latent_space is False
+            assert config.export_patient_similarity is True
+            assert config.export_cooutlier_patient_similarity is False
+        finally:
+            Path(temp_path).unlink()
+
+    def test_load_rejects_fractional_integer_fields(self):
+        """Integer-like YAML fields must not silently truncate fractional values."""
+        config_dict = {
+            "out_dir": "output",
+            "input_intensities": "data.csv",
+            "cohort_stability_n_runs": 30.5,
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_dict, f)
+            temp_path = f.name
+
+        try:
+            with pytest.raises(ValueError, match="cohort_stability_n_runs"):
+                load_config(temp_path)
+        finally:
+            Path(temp_path).unlink()
     
     def test_load_nonexistent_file(self):
         """Test that loading nonexistent file raises error."""
