@@ -291,6 +291,103 @@ class TestLoadConfig:
             assert config.n_jobs == -1
         finally:
             Path(temp_path).unlink()
+
+    def test_load_string_int_fields_as_int(self):
+        """YAML/R may quote integer fields; stability loops still need real ints."""
+        config_dict = {
+            "out_dir": "output",
+            "input_intensities": "data.csv",
+            "n_epochs": "25",
+            "batch_size": "8",
+            "cohort_stability_n_runs": "12",
+            "cohort_stability_min_runs": "4",
+            "cohort_stability_min_samples": "6",
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_dict, f)
+            temp_path = f.name
+
+        try:
+            config = load_config(temp_path)
+            assert config.n_epochs == 25
+            assert isinstance(config.n_epochs, int)
+            assert config.batch_size == 8
+            assert isinstance(config.batch_size, int)
+            assert config.cohort_stability_n_runs == 12
+            assert isinstance(config.cohort_stability_n_runs, int)
+            assert config.cohort_stability_min_runs == 4
+            assert config.cohort_stability_min_samples == 6
+        finally:
+            Path(temp_path).unlink()
+
+    def test_load_string_boolean_fields(self):
+        """R-written configs often serialize booleans as yes/no-like strings."""
+        config_dict = {
+            "out_dir": "output",
+            "input_intensities": "data.csv",
+            "cohort_stability": "yes",
+            "export_latent_space": "no",
+            "export_patient_similarity": "off",
+            "report_all": "1",
+            "verbose": "0",
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_dict, f)
+            temp_path = f.name
+
+        try:
+            config = load_config(temp_path)
+            assert config.cohort_stability is True
+            assert config.export_latent_space is False
+            assert config.export_patient_similarity is False
+            assert config.report_all is True
+            assert config.verbose is False
+        finally:
+            Path(temp_path).unlink()
+
+    def test_load_rejects_non_whole_int_field(self):
+        """Fractional run counts would make downstream range/sample logic ambiguous."""
+        config_dict = {
+            "out_dir": "output",
+            "input_intensities": "data.csv",
+            "cohort_stability_n_runs": "5.5",
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_dict, f)
+            temp_path = f.name
+
+        try:
+            with pytest.raises(
+                ValueError,
+                match="cohort_stability_n_runs must be a whole number",
+            ):
+                load_config(temp_path)
+        finally:
+            Path(temp_path).unlink()
+
+    def test_load_rejects_invalid_boolean_field(self):
+        """Invalid boolean spellings should fail before toggling runtime behavior."""
+        config_dict = {
+            "out_dir": "output",
+            "input_intensities": "data.csv",
+            "export_latent_space": "maybe",
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_dict, f)
+            temp_path = f.name
+
+        try:
+            with pytest.raises(
+                ValueError,
+                match="export_latent_space must be a boolean",
+            ):
+                load_config(temp_path)
+        finally:
+            Path(temp_path).unlink()
     
     def test_load_nonexistent_file(self):
         """Test that loading nonexistent file raises error."""
