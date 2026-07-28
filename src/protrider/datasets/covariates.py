@@ -3,20 +3,33 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 import logging
 
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['parse_covariates']
+__all__ = ['NoValidCovariatesError', 'parse_covariates']
 
-def parse_covariates(sa_file: Optional[str], cov_used: Optional[list]) -> tuple[np.ndarray, np.ndarray]:
+_SAMPLE_ID_COLUMN_CANDIDATES = ("sample_ID", "sampleID", "sample_id")
+
+
+class NoValidCovariatesError(ValueError):
+    """Raised when all requested covariates are unusable after parsing."""
+
+
+def parse_covariates(
+    sa_file: Optional[str],
+    cov_used: Optional[list],
+    sample_ids: Optional[Iterable[str]] = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Parse covariates from sample annotation file.
     
     Args:
         sa_file: Path to sample annotation file (CSV/TSV)
         cov_used: List of covariate column names to use
+        sample_ids: Optional sample IDs from the intensity matrix. When
+            provided, annotation rows are aligned to this order by sample ID.
         
     Returns:
         tuple: (covariates, centered_covariates_noNA)
@@ -31,6 +44,8 @@ def parse_covariates(sa_file: Optional[str], cov_used: Optional[list]) -> tuple[
     # Read sample annotation file
     sample_anno = read_annotation_file(sa_file)
     logger.info(f'Finished reading sample annotation with shape: {sample_anno.shape}')
+    if sample_ids is not None:
+        sample_anno = _align_annotation_to_samples(sample_anno, sample_ids)
     
     # Process covariates
     processed_covariates = _process_covariates(sample_anno[cov_used])
@@ -54,6 +69,51 @@ def read_annotation_file(sa_file):
         return pd.read_csv(sa_file, sep="\t")
     else:
         raise ValueError(f"Unsupported file type: {file_extension}")
+
+
+def _align_annotation_to_samples(sample_anno, sample_ids):
+    """Return annotation rows in the same order as the intensity sample IDs."""
+    id_col = _detect_sample_id_column(sample_anno)
+    if id_col is None:
+        expected_columns = ", ".join(_SAMPLE_ID_COLUMN_CANDIDATES)
+        raise ValueError(
+            "Sample annotation must include a sample ID column "
+            f"({expected_columns}) when covariates are used."
+        )
+
+    expected_ids = [str(sample_id) for sample_id in sample_ids]
+    if pd.Index(expected_ids).duplicated().any():
+        duplicated = pd.Index(expected_ids)[pd.Index(expected_ids).duplicated()].unique()
+        raise ValueError(f"Duplicate sample IDs in intensity data: {duplicated.tolist()[:5]}...")
+
+    indexed = sample_anno.copy()
+    indexed[id_col] = indexed[id_col].astype(str)
+    duplicated = indexed.loc[indexed[id_col].duplicated(), id_col].unique()
+    if len(duplicated) > 0:
+        raise ValueError(f"Duplicate sample IDs in annotation '{id_col}': {duplicated.tolist()[:5]}...")
+
+    indexed = indexed.set_index(id_col, drop=False)
+    missing = [sample_id for sample_id in expected_ids if sample_id not in indexed.index]
+    if missing:
+        raise ValueError(
+            f"Samples missing from annotation '{id_col}': {missing[:5]}..."
+        )
+
+    extra_count = len(set(indexed.index) - set(expected_ids))
+    if extra_count:
+        logger.warning(
+            "Ignoring %d annotation rows not present in intensity data.",
+            extra_count,
+        )
+
+    return indexed.loc[expected_ids].reset_index(drop=True)
+
+
+def _detect_sample_id_column(sample_anno):
+    for candidate in _SAMPLE_ID_COLUMN_CANDIDATES:
+        if candidate in sample_anno.columns:
+            return candidate
+    return None
 
 
 def _is_numeric_dtype(dtype):
@@ -134,6 +194,6 @@ def _combine_covariates(processed_covariates):
         covariates = np.concatenate(covariate_arrays, axis=1)
         centered_covariates = np.concatenate(centered_covariate_arrays, axis=1)
     else:
-        raise ValueError("No valid covariates found.")
+        raise NoValidCovariatesError("No valid covariates found.")
     
     return covariates, centered_covariates

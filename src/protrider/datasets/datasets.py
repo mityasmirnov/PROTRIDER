@@ -8,7 +8,7 @@ import copy
 from abc import ABC
 from optht import optht
 import logging
-from .covariates import parse_covariates
+from .covariates import NoValidCovariatesError, parse_covariates
 from .protein_intensities import read_protein_intensities, preprocess_protein_intensities
 
 logger = logging.getLogger(__name__)
@@ -66,10 +66,13 @@ class ProtriderDataset(Dataset, PCADataset):
         # Read and preprocess covariates
         if sa_file is not None and cov_used is not None:
             try:
-                self.covariates, self.centered_covariates_noNA = parse_covariates(sa_file, cov_used)
+                sample_ids = self.data.index.astype(str).tolist()
+                self.covariates, self.centered_covariates_noNA = parse_covariates(
+                    sa_file, cov_used, sample_ids=sample_ids
+                )
                 self.covariates = torch.from_numpy(self.covariates)
                 self.centered_covariates_noNA = torch.from_numpy(self.centered_covariates_noNA)
-            except ValueError:
+            except NoValidCovariatesError:
                 logger.warning("No valid covariates found after parsing.")
                 self.covariates = torch.empty(self.data.shape[0], 0)
                 self.centered_covariates_noNA = torch.empty(self.data.shape[0], 0)
