@@ -140,6 +140,11 @@ if (is.null(config_list$cooutlier_min_samples_for_clustering)) {
 
 # Avoid accidental checkpoint reuse from old runs.
 config_list$checkpoint_path <- NULL
+default_checkpoint_path <- file.path(out_dir, "model.pt")
+if (file.exists(default_checkpoint_path)) {
+  unlink(default_checkpoint_path)
+  message("Removed stale default checkpoint: ", default_checkpoint_path)
+}
 
 yaml::write_yaml(config_list, run_config_path)
 
