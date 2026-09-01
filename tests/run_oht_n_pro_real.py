@@ -29,6 +29,7 @@ DEFAULT_ANNOTATION = Path(
     "/Users/Mitya/Desktop/working/omicsDagnostics_data/processed_data/protrider/protrider_annotation.tsv"
 )
 DEFAULT_OUT_DIR = Path("/Volumes/Transcend/prot/protrider_stability_dev")
+DEFAULT_CHECKPOINT_NAME = "model.pt"
 
 
 def build_run_config(
@@ -89,8 +90,6 @@ def build_run_config(
 
 
 def protrider_bin() -> str:
-    import shutil
-
     for candidate in (
         shutil.which("protrider"),
         "/opt/miniconda3/envs/omicsDiagnosticsDev/bin/protrider",
@@ -98,6 +97,14 @@ def protrider_bin() -> str:
         if candidate:
             return candidate
     raise FileNotFoundError("protrider CLI not found; activate omicsDiagnosticsDev")
+
+
+def remove_stale_default_checkpoint(out_dir: Path) -> bool:
+    checkpoint_path = out_dir / DEFAULT_CHECKPOINT_NAME
+    if not checkpoint_path.exists():
+        return False
+    checkpoint_path.unlink()
+    return True
 
 
 def run_cmd(cmd: list[str]) -> None:
@@ -167,6 +174,8 @@ def main() -> int:
         shutil.rmtree(args.out_dir, ignore_errors=True)
 
     run_config = build_run_config(args.base_config, args.out_dir, smoke=args.smoke)
+    if remove_stale_default_checkpoint(args.out_dir):
+        print(f"Removed stale default checkpoint: {args.out_dir / DEFAULT_CHECKPOINT_NAME}")
 
     cli = protrider_bin()
     run_cmd([cli, "run", "--config", str(run_config)])
