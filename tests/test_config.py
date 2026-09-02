@@ -75,6 +75,16 @@ class TestProtriderConfig:
         assert config.pval_dist == "t"
         assert hasattr(config, "out_dir")
         assert hasattr(config, "lr")
+
+    def test_integer_find_q_method_is_supported(self):
+        """A fixed latent dimension may be supplied as a Python integer."""
+        config = ProtriderConfig(
+            out_dir="output",
+            input_intensities="data.csv",
+            find_q_method=5,
+        )
+
+        assert config.find_q_method == "5"
     
     def test_type_checking(self):
         """Test that types are correctly set."""
@@ -289,6 +299,28 @@ class TestLoadConfig:
             assert config.cohort_stability_min_samples == 30
             assert config.cohort_stability_seed == 42
             assert config.n_jobs == -1
+        finally:
+            Path(temp_path).unlink()
+
+    def test_load_numeric_find_q_method_and_boolean_flags(self):
+        """YAML numeric fixed-q and 0/1 booleans must not crash config loading."""
+        config_dict = {
+            "out_dir": "output",
+            "input_intensities": "data.csv",
+            "find_q_method": 5,
+            "cohort_stability": 0,
+            "export_cooutlier_patient_similarity": 0,
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_dict, f)
+            temp_path = f.name
+
+        try:
+            config = load_config(temp_path)
+            assert config.find_q_method == "5"
+            assert config.cohort_stability is False
+            assert config.export_cooutlier_patient_similarity is False
         finally:
             Path(temp_path).unlink()
     
