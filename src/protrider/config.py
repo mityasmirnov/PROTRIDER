@@ -54,7 +54,7 @@ class ProtriderConfig:
     n_epochs: int = 100
     lr: float = 1e-4
     batch_size: Optional[int] = None
-    find_q_method: str = "OHT"  # "OHT", "gs", or an integer
+    find_q_method: Union[str, int] = "OHT"  # "OHT", "gs", or an integer
     init_pca: bool = True
     h_dim: Optional[int] = None
     patience: int = 50
@@ -115,6 +115,8 @@ class ProtriderConfig:
     
     def __post_init__(self):
         """Validate configuration after initialization and set computed fields."""
+        self.find_q_method = _coerce_find_q_method(self.find_q_method)
+
         # Validation
         if self.max_allowed_NAs_per_protein < 0 or self.max_allowed_NAs_per_protein > 1:
             raise ValueError("max_allowed_NAs_per_protein must be between 0 and 1")
@@ -292,6 +294,23 @@ def _coerce_int(value, field_name: str) -> int:
     raise TypeError(f"{field_name} must be int-like, got {type(value).__name__}")
 
 
+def _coerce_find_q_method(value) -> str:
+    """Normalize fixed latent dimensions to the string form used by the pipeline."""
+    if isinstance(value, bool):
+        raise ValueError("find_q_method must be 'OHT', 'gs', 'bs' or an integer")
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if value.is_integer():
+            return str(int(value))
+        raise ValueError("find_q_method must be 'OHT', 'gs', 'bs' or an integer")
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized in {"OHT", "gs", "bs"} or normalized.isdigit():
+            return normalized
+    raise ValueError("find_q_method must be 'OHT', 'gs', 'bs' or an integer")
+
+
 def _normalize_config_dict(config_dict: dict) -> dict:
     """Normalize types after yaml.safe_load (strings, floats-as-ints, yes/no booleans)."""
     # YAML may load scientific notation as strings depending on the parser/version.
@@ -334,6 +353,11 @@ def _normalize_config_dict(config_dict: dict) -> dict:
         if key in config_dict and config_dict[key] is not None:
             config_dict[key] = _coerce_int(config_dict[key], key)
 
+    if "find_q_method" in config_dict and config_dict["find_q_method"] is not None:
+        config_dict["find_q_method"] = _coerce_find_q_method(
+            config_dict["find_q_method"]
+        )
+
     _bool_keys = (
         "autoencoder_training",
         "init_pca",
@@ -359,6 +383,10 @@ def _normalize_config_dict(config_dict: dict) -> dict:
 def _coerce_bool(value, field_name: str) -> bool:
     if isinstance(value, bool):
         return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, float) and value in {0.0, 1.0}:
+        return bool(value)
     if isinstance(value, str):
         normalized = value.strip().lower()
         if normalized in {"true", "yes", "1", "on"}:
