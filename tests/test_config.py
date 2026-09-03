@@ -291,6 +291,55 @@ class TestLoadConfig:
             assert config.n_jobs == -1
         finally:
             Path(temp_path).unlink()
+
+    def test_load_string_stability_run_counts_as_int(self):
+        """YAML written by scripts may preserve run counts as strings."""
+        config_dict = {
+            "out_dir": "output",
+            "input_intensities": "data.csv",
+            "cohort_stability_n_runs": "12",
+            "cohort_stability_min_runs": "4",
+            "cohort_stability_min_samples": "33",
+            "cohort_stability_seed": "7",
+            "n_jobs": "-1",
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_dict, f)
+            temp_path = f.name
+
+        try:
+            config = load_config(temp_path)
+            assert config.cohort_stability_n_runs == 12
+            assert isinstance(config.cohort_stability_n_runs, int)
+            assert config.cohort_stability_min_runs == 4
+            assert config.cohort_stability_min_samples == 33
+            assert config.cohort_stability_seed == 7
+            assert config.n_jobs == -1
+        finally:
+            Path(temp_path).unlink()
+
+    def test_load_yes_no_cohort_stability_booleans(self):
+        """YAML config variants should coerce yes/no booleans before validation."""
+        config_dict = {
+            "out_dir": "output",
+            "input_intensities": "data.csv",
+            "cohort_stability": "yes",
+            "cohort_stability_require_oht": "no",
+            "cohort_stability_save_iteration_files": "yes",
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_dict, f)
+            temp_path = f.name
+
+        try:
+            config = load_config(temp_path)
+            assert config.cohort_stability is True
+            assert config.cohort_stability_require_oht is False
+            assert config.cohort_stability_save_iteration_files is True
+        finally:
+            Path(temp_path).unlink()
     
     def test_load_nonexistent_file(self):
         """Test that loading nonexistent file raises error."""
