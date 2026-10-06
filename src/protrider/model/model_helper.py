@@ -12,9 +12,23 @@ from .model import ProtriderAutoencoder, train, MSEBCELoss  # masked
 from protrider.datasets import ProtriderSubset, ProtriderDataset
 import logging
 
-__all__ = ['init_model', 'find_latent_dim', 'GridSearchResult']
+__all__ = ['init_model', 'find_latent_dim', 'GridSearchResult', '_binary_search_bounds']
 
 logger = logging.getLogger(__name__)
+
+
+def _binary_search_bounds(q: int, factor: int, k_max: int) -> tuple[int, int, int]:
+    """
+    Initial (L, M, R) for the latent-dim binary search.
+
+    Upstream fix ab08de8: k_max (the number of proteins) was computed by the
+    caller but never used, so R = int(q * 3) could exceed k_max and request
+    an invalid latent dimension (Vt has only k_max columns) — a quiet
+    quality bug, not a crash, since dataset.Vt[:latent_dim] silently
+    truncates. R only ever shrinks in the search loop afterwards, so capping
+    it here is sufficient.
+    """
+    return max(1, q // factor), q, min(int(q * 3), k_max)
 
 @dataclass
 class GridSearchResult:
