@@ -119,12 +119,7 @@ def find_latent_dim(dataset: ProtriderDataset, method='OHT',
         tol=1e-6
         
         k_max = injected_dataset.X.shape[1]
-
-        # upstream fix ab08de8: k_max was computed but never used, so the
-        # binary search's right bound (int(q * 3)) could exceed the number
-        # of proteins and request an invalid latent dimension (Vt has only
-        # k_max columns). Cap R at k_max; it only ever shrinks afterwards.
-        L, M, R = max(1, q // factor), q, min(int(q * 3), k_max)
+        L, M, R = _binary_search_bounds(q, factor, k_max)
         fL, fM, fR = train_and_eval_q(L), train_and_eval_q(M), train_and_eval_q(R)
         
         enc2auprc[L] = fL
