@@ -9,6 +9,8 @@ import pytest
 import tempfile
 import shutil
 from pathlib import Path
+
+import numpy as np
 import torch
 
 from protrider import ProtriderConfig, run
@@ -95,11 +97,12 @@ def test_load_model(sample_dataset, temp_output_dir):
         device='cpu'
     )
     
-    model_loaded, q_loaded = load_model(sample_dataset, str(checkpoint_path), config)
+    model_loaded, q_loaded, fit_loaded = load_model(sample_dataset, str(checkpoint_path), config)
     
     # Verify model was loaded
     assert model_loaded is not None, "Model should be loaded"
     assert q_loaded == 5, "Latent dimension should match"
+    assert fit_loaded is None, "Weights-only save has no frozen null yet"
     
     # Verify model state matches
     for key in model_original.state_dict():
@@ -118,10 +121,11 @@ def test_load_nonexistent_model(sample_dataset, temp_output_dir):
     )
     
     checkpoint_path = Path(temp_output_dir) / 'nonexistent.pt'
-    model, q = load_model(sample_dataset, str(checkpoint_path), config)
+    model, q, fit_params = load_model(sample_dataset, str(checkpoint_path), config)
     
     assert model is None, "Should return None when model doesn't exist"
     assert q is None, "Should return None for q when model doesn't exist"
+    assert fit_params is None, "Should return None for fit_params when model doesn't exist"
 
 
 def test_custom_checkpoint_path(temp_output_dir):
@@ -183,6 +187,47 @@ def test_default_checkpoint_behavior(temp_output_dir):
     # Second run: auto-load from default location
     result2, model_info2, *_ = run(config1)
     assert model_info1.q == model_info2.q, "Should load from default location"
+
+
+def test_checkpoint_frozen_null_not_refit(temp_output_dir):
+    """refit_null=False must reuse checkpoint fit_params (docs/19 §5.4)."""
+    checkpoint_path = Path(temp_output_dir) / 'frozen_null.pt'
+    out1 = Path(temp_output_dir) / 'run1'
+    out2 = Path(temp_output_dir) / 'run2'
+    out1.mkdir()
+    out2.mkdir()
+
+    config_train = ProtriderConfig(
+        input_intensities='sample_data/protrider_sample_dataset.tsv',
+        sample_annotation='sample_data/sample_annotations.tsv',
+        out_dir=str(out1),
+        checkpoint_path=str(checkpoint_path),
+        n_epochs=2,
+        device='cpu',
+        find_q_method='5',
+        refit_null=True,
+    )
+    _result1, _info1, fit_train, *_ = run(config_train)
+    assert checkpoint_path.exists()
+    ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+    assert 'fit_params' in ckpt, "Training run must persist residual null in checkpoint"
+
+    config_frozen = ProtriderConfig(
+        input_intensities='sample_data/protrider_sample_dataset.tsv',
+        sample_annotation='sample_data/sample_annotations.tsv',
+        out_dir=str(out2),
+        checkpoint_path=str(checkpoint_path),
+        n_epochs=2,
+        device='cpu',
+        find_q_method='5',
+        refit_null=False,
+    )
+    _result2, _info2, fit_frozen, *_ = run(config_frozen)
+
+    assert np.allclose(fit_train.means, fit_frozen.means)
+    assert np.allclose(fit_train.sigmas, fit_frozen.sigmas)
+    if fit_train.degrees_freedoms is not None:
+        assert np.allclose(fit_train.degrees_freedoms, fit_frozen.degrees_freedoms)
 
 
 if __name__ == '__main__':

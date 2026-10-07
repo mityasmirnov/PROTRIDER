@@ -27,6 +27,33 @@ class FitParameters:
             'degrees_freedom': self.degrees_freedoms
         }
 
+    def to_checkpoint(self) -> dict:
+        """Serialize for inclusion in a model.pt checkpoint."""
+        return {
+            'genes': np.asarray(self.genes),
+            'sigmas': np.asarray(self.sigmas, dtype=np.float64),
+            'means': np.asarray(self.means, dtype=np.float64),
+            'degrees_freedoms': (
+                None
+                if self.degrees_freedoms is None
+                else np.asarray(self.degrees_freedoms, dtype=np.float64)
+            ),
+        }
+
+    @classmethod
+    def from_checkpoint(cls, payload: dict) -> "FitParameters":
+        """Restore from ``to_checkpoint()`` payload."""
+        return cls(
+            genes=np.asarray(payload['genes']),
+            sigmas=np.asarray(payload['sigmas'], dtype=np.float64),
+            means=np.asarray(payload['means'], dtype=np.float64),
+            degrees_freedoms=(
+                None
+                if payload.get('degrees_freedoms') is None
+                else np.asarray(payload['degrees_freedoms'], dtype=np.float64)
+            ),
+        )
+
     def to_csv(self, out_dir: str):
         df = pd.DataFrame(self.to_dict())
         df.to_csv(Path(out_dir) / 'fit_parameters.csv', index=False)

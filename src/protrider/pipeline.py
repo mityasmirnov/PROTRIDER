@@ -20,31 +20,46 @@ __all__ = ["run"]
 logger = logging.getLogger(__name__)
 
 
-def save_model(model: ProtriderAutoencoder, checkpoint_path: str, q: int) -> None:
-    """Save model state dict and metadata to checkpoint path.
+def save_model(
+    model: ProtriderAutoencoder,
+    checkpoint_path: str,
+    q: int,
+    fit_params: Optional[FitParameters] = None,
+) -> None:
+    """Save model state dict, metadata, and optional frozen residual null.
     
     Args:
         model: Trained ProtriderAutoencoder model
         checkpoint_path: Path where to save the model checkpoint
         q: Latent dimension
+        fit_params: Optional residual-null parameters to freeze for inductive scoring
     """
     checkpoint_path = Path(checkpoint_path)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    # Save model state dict and metadata
-    torch.save({
+
+    payload = {
         'model_state_dict': model.state_dict(),
         'q': q,
         'n_layers': model.n_layers,
         'presence_absence': model.presence_absence,
-    }, checkpoint_path)
-    
-    logger.info(f'Saved model to {checkpoint_path}')
+    }
+    if fit_params is not None:
+        payload['fit_params'] = fit_params.to_checkpoint()
+
+    torch.save(payload, checkpoint_path)
+    logger.info(
+        'Saved model to %s%s',
+        checkpoint_path,
+        ' (with frozen null)' if fit_params is not None else '',
+    )
 
 
-def load_model(dataset: Union[ProtriderDataset, ProtriderSubset], checkpoint_path: str, 
-               config: ProtriderConfig) -> Tuple[Optional[ProtriderAutoencoder], Optional[int]]:
-    """Load model from checkpoint path if it exists.
+def load_model(
+    dataset: Union[ProtriderDataset, ProtriderSubset],
+    checkpoint_path: str,
+    config: ProtriderConfig,
+) -> Tuple[Optional[ProtriderAutoencoder], Optional[int], Optional[FitParameters]]:
+    """Load model (and optional frozen null) from checkpoint path if it exists.
     
     Args:
         dataset: Dataset used for model initialization
@@ -52,13 +67,14 @@ def load_model(dataset: Union[ProtriderDataset, ProtriderSubset], checkpoint_pat
         config: ProtriderConfig object
         
     Returns:
-        Tuple of (model, q) if model exists and loads successfully, (None, None) otherwise
+        Tuple of (model, q, fit_params). fit_params is None when absent or on failure.
+        (None, None, None) when the checkpoint is missing/unreadable.
     """
     checkpoint_path = Path(checkpoint_path)
     
     if not checkpoint_path.exists():
         logger.info(f'No existing model found at {checkpoint_path}')
-        return None, None
+        return None, None, None
     
     try:
         # Load checkpoint
@@ -85,13 +101,18 @@ def load_model(dataset: Union[ProtriderDataset, ProtriderSubset], checkpoint_pat
         
         # Load state dict
         model.load_state_dict(checkpoint['model_state_dict'])
+
+        fit_params = None
+        if checkpoint.get('fit_params') is not None:
+            fit_params = FitParameters.from_checkpoint(checkpoint['fit_params'])
+            logger.info('Loaded frozen residual null from checkpoint (%d proteins)', len(fit_params.genes))
         
         logger.info('Successfully loaded model')
-        return model, q
+        return model, q, fit_params
         
     except Exception as e:
         logger.warning(f'Failed to load model from {checkpoint_path}: {e}')
-        return None, None
+        return None, None, None
 
 
 @dataclass
@@ -468,6 +489,7 @@ def run(config: ProtriderConfig) -> Tuple[Result, ModelInfo, FitParameters, Grid
     # 2. Determine checkpoint path and try to load existing model
     model = None
     q = None
+    frozen_fit_params: Optional[FitParameters] = None
     # Use custom checkpoint path if specified, otherwise default to out_dir/model.pt
     if config.checkpoint_path:
         checkpoint_path = Path(config.checkpoint_path)
@@ -478,7 +500,7 @@ def run(config: ProtriderConfig) -> Tuple[Result, ModelInfo, FitParameters, Grid
     
     if checkpoint_path and checkpoint_path.exists():
         logger.info(f'Attempting to load model from {checkpoint_path}')
-        model, q = load_model(dataset, str(checkpoint_path), config)
+        model, q, frozen_fit_params = load_model(dataset, str(checkpoint_path), config)
     
     # 3. If model not loaded, find latent dim and initialize new model
     gs_result = None  # Initialize empty grid search result
@@ -564,9 +586,9 @@ def run(config: ProtriderConfig) -> Tuple[Result, ModelInfo, FitParameters, Grid
         logger.info('Final loss: %s, mse loss: %s, bce loss: %s',
                     final_loss, final_mse_loss, final_bce_loss)
         
-        # Save the trained model to checkpoint
+        # Weights-only save here; null is written after fit_residuals below.
         if checkpoint_path:
-            save_model(model, str(checkpoint_path), q)
+            save_model(model, str(checkpoint_path), q, fit_params=frozen_fit_params)
             if config.use_wandb:
                 wandb.log_model(str(checkpoint_path), 'protrider_model')
         
@@ -581,7 +603,40 @@ def run(config: ProtriderConfig) -> Tuple[Result, ModelInfo, FitParameters, Grid
     logger.info('Computing statistics')
     df_res = dataset.data - df_out  # log data - pred data
 
-    fit_params = fit_residuals(df_res, dis=config.pval_dist, n_jobs=config.n_jobs, use_common_df=config.common_degrees_freedom)
+    use_frozen = (
+        not config.refit_null
+        and frozen_fit_params is not None
+        and np.array_equal(np.asarray(frozen_fit_params.genes), np.asarray(df_res.columns))
+    )
+    if use_frozen:
+        logger.info(
+            'Using frozen residual null from checkpoint (refit_null=False; %d proteins)',
+            len(frozen_fit_params.genes),
+        )
+        fit_params = frozen_fit_params
+    else:
+        if not config.refit_null and frozen_fit_params is None:
+            logger.warning(
+                'refit_null=False but checkpoint has no fit_params; refitting null on current cohort'
+            )
+        elif (
+            not config.refit_null
+            and frozen_fit_params is not None
+            and not np.array_equal(np.asarray(frozen_fit_params.genes), np.asarray(df_res.columns))
+        ):
+            logger.warning(
+                'refit_null=False but checkpoint protein order differs from cohort; refitting null'
+            )
+        fit_params = fit_residuals(
+            df_res,
+            dis=config.pval_dist,
+            n_jobs=config.n_jobs,
+            use_common_df=config.common_degrees_freedom,
+        )
+        # Persist null into the checkpoint so a later refit_null=False run can reuse it.
+        if checkpoint_path and (should_train or frozen_fit_params is None):
+            save_model(model, str(checkpoint_path), q, fit_params=fit_params)
+
     pvals, Z = get_pvals(df_res.values,
                          fit_params=fit_params,
                          how=config.pval_sided,

@@ -91,6 +91,11 @@ class ProtriderConfig:
     # If path doesn't exist: train and save to this path
     checkpoint_path: Optional[str] = None
 
+    # When False and the checkpoint stores fit_params, score with that frozen
+    # residual null instead of calling fit_residuals() on the current cohort
+    # (docs/19 §5.4 inductive clinical scoring). Default True keeps legacy behaviour.
+    refit_null: bool = True
+
     # Cohort stability analysis (subsampling; not classical bootstrap)
     cohort_stability: bool = False
     cohort_stability_n_runs: int = 100
