@@ -478,6 +478,17 @@ def test_load_numeric_find_q_method_and_boolean_flags(self):
             "find_q_method": 5,
             "cohort_stability": 0,
             "export_cooutlier_patient_similarity": 0,
+
+def test_load_string_stability_run_counts_as_int(self):
+        """YAML written by scripts may preserve run counts as strings."""
+        config_dict = {
+            "out_dir": "output",
+            "input_intensities": "data.csv",
+            "cohort_stability_n_runs": "12",
+            "cohort_stability_min_runs": "4",
+            "cohort_stability_min_samples": "33",
+            "cohort_stability_seed": "7",
+            "n_jobs": "-1",
         }
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -519,6 +530,18 @@ assert config.n_epochs == 25
 
     def test_load_string_boolean_fields(self):
         """R-written configs often serialize booleans as yes/no-like strings."""
+
+assert config.cohort_stability_n_runs == 12
+            assert isinstance(config.cohort_stability_n_runs, int)
+            assert config.cohort_stability_min_runs == 4
+            assert config.cohort_stability_min_samples == 33
+            assert config.cohort_stability_seed == 7
+            assert config.n_jobs == -1
+        finally:
+            Path(temp_path).unlink()
+
+    def test_load_yes_no_cohort_stability_booleans(self):
+        """YAML config variants should coerce yes/no booleans before validation."""
         config_dict = {
             "out_dir": "output",
             "input_intensities": "data.csv",
@@ -527,6 +550,9 @@ assert config.n_epochs == 25
             "export_patient_similarity": "off",
             "report_all": "1",
             "verbose": "0",
+
+"cohort_stability_require_oht": "no",
+            "cohort_stability_save_iteration_files": "yes",
         }
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -590,6 +616,11 @@ config = load_config(temp_path)
 assert config.find_q_method == "5"
             assert config.cohort_stability is False
             assert config.export_cooutlier_patient_similarity is False
+
+config = load_config(temp_path)
+            assert config.cohort_stability is True
+            assert config.cohort_stability_require_oht is False
+            assert config.cohort_stability_save_iteration_files is True
         finally:
             Path(temp_path).unlink()
     
