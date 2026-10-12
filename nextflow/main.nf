@@ -88,12 +88,27 @@ PY
     """
 }
 
+workflow PROTRIDER_RUN_PLOT {
+    take:
+    intensities
+    sample_annotation
+    base_config
+
+    main:
+    prepared = PREPARE_CONFIG(base_config, intensities, sample_annotation)
+    run_out = RUN_PROTRIDER(prepared, intensities, sample_annotation)
+    plot_out = PLOT_PROTRIDER(prepared, run_out.out_dir)
+
+    emit:
+    results = run_out.results
+    out_dir = run_out.out_dir
+    plots = plot_out.plots
+}
+
 workflow {
     intensities_ch = Channel.fromPath(params.intensities, checkIfExists: true)
     annotation_ch = Channel.fromPath(params.sample_annotation, checkIfExists: true)
     config_ch = Channel.fromPath(params.config, checkIfExists: true)
 
-    prepared = PREPARE_CONFIG(config_ch, intensities_ch, annotation_ch)
-    run_out = RUN_PROTRIDER(prepared, intensities_ch, annotation_ch)
-    PLOT_PROTRIDER(prepared, run_out.out_dir)
+    PROTRIDER_RUN_PLOT(intensities_ch, annotation_ch, config_ch)
 }
