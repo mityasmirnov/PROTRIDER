@@ -2,6 +2,11 @@
 
 Minimal Nextflow workflow that runs `protrider run` then `protrider plot all` on an intensities TSV, sample annotation, and YAML config. Designed as a local demo using `sample_data/`.
 
+Layout:
+
+- `main.nf` — standalone entry (anonymous workflow)
+- `run_plot.nf` — processes + named workflow `PROTRIDER_RUN_PLOT` for include from COWRD umbrella
+
 ## Requirements
 
 - Nextflow ≥ 22.10
