@@ -74,6 +74,41 @@ class TestParseCovariates:
         assert not np.isnan(covariates).any()
         assert not np.isnan(centered_covariates).any()
 
+    def test_parse_covariates_aligns_to_sample_ids(self):
+        """Test that annotations are reordered to match intensity sample IDs."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.tsv', delete=False) as f:
+            f.write("sample_ID\tAGE\n")
+            f.write("sample_2\t20\n")
+            f.write("sample_1\t10\n")
+            f.write("sample_3\t30\n")
+            temp_file = f.name
+
+        try:
+            covariates, centered_covariates = parse_covariates(
+                temp_file,
+                ['AGE'],
+                sample_ids=['sample_1', 'sample_2', 'sample_3'],
+            )
+
+            np.testing.assert_array_equal(covariates[:, 0], np.array([10, 20, 30]))
+            np.testing.assert_allclose(centered_covariates[:, 0], np.array([-10, 0, 10]))
+        finally:
+            os.unlink(temp_file)
+
+    def test_parse_covariates_requires_sample_id_column_when_aligning(self):
+        """Test that alignment cannot silently fall back to positional rows."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.tsv', delete=False) as f:
+            f.write("AGE\n")
+            f.write("20\n")
+            f.write("10\n")
+            temp_file = f.name
+
+        try:
+            with pytest.raises(ValueError, match="sample ID column"):
+                parse_covariates(temp_file, ['AGE'], sample_ids=['sample_1', 'sample_2'])
+        finally:
+            os.unlink(temp_file)
+
     def test_parse_covariates_with_na_values(self):
         """Test parsing of covariates with missing values."""
         # Create temporary file with missing values
