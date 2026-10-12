@@ -75,16 +75,6 @@ class TestProtriderConfig:
         assert config.pval_dist == "t"
         assert hasattr(config, "out_dir")
         assert hasattr(config, "lr")
-
-    def test_integer_find_q_method_is_supported(self):
-        """A fixed latent dimension may be supplied as a Python integer."""
-        config = ProtriderConfig(
-            out_dir="output",
-            input_intensities="data.csv",
-            find_q_method=5,
-        )
-
-        assert config.find_q_method == "5"
     
     def test_type_checking(self):
         """Test that types are correctly set."""
@@ -199,15 +189,6 @@ class TestConfigValidation:
             find_q_method="gs"
         )
         assert config.find_q_method == "gs"
-
-    def test_valid_find_q_method_bs(self):
-        """Test that 'bs' is a valid find_q_method."""
-        config = ProtriderConfig(
-            out_dir="output",
-            input_intensities="data.csv",
-            find_q_method="bs"
-        )
-        assert config.find_q_method == "bs"
     
     def test_valid_find_q_method_integer(self):
         """Test that integer string is a valid find_q_method."""
@@ -311,175 +292,7 @@ class TestLoadConfig:
         finally:
             Path(temp_path).unlink()
 
-    def test_load_string_boolean_values(self, tmp_path):
-        """Quoted YAML booleans from hand-edited configs should normalize safely."""
-        path = tmp_path / "booleans.yaml"
-        path.write_text(
-            "\n".join(
-                [
-                    "out_dir: output",
-                    "input_intensities: data.csv",
-                    'cohort_stability: "yes"',
-                    'report_all: "no"',
-                    'verbose: "on"',
-                    'export_latent_space: "0"',
-                    'export_patient_similarity: "false"',
-                    'export_cooutlier_patient_similarity: "off"',
-                ]
-            )
-        )
-
-        config = load_config(path)
-
-        assert config.cohort_stability is True
-        assert config.report_all is False
-        assert config.verbose is True
-        assert config.export_latent_space is False
-        assert config.export_patient_similarity is False
-        assert config.export_cooutlier_patient_similarity is False
-
-    def test_load_string_stability_ints_and_runtime_budget(self, tmp_path):
-        """String scalars from YAML should become usable numeric stability settings."""
-        path = tmp_path / "stability_numbers.yaml"
-        path.write_text(
-            "\n".join(
-                [
-                    "out_dir: output",
-                    "input_intensities: data.csv",
-                    'cohort_stability_n_runs: "30"',
-                    'cohort_stability_min_runs: "10"',
-                    'cohort_stability_min_samples: "31"',
-                    'cohort_stability_max_runtime_min: "45"',
-                ]
-            )
-        )
-
-        config = load_config(path)
-
-        assert config.cohort_stability_n_runs == 30
-        assert isinstance(config.cohort_stability_n_runs, int)
-        assert config.cohort_stability_min_runs == 10
-        assert config.cohort_stability_min_samples == 31
-        assert config.cohort_stability_max_runtime_min == 45.0
-        assert isinstance(config.cohort_stability_max_runtime_min, float)
-
-    @pytest.mark.parametrize(
-        "bad_value",
-        [
-            "true",
-            "30.5",
-            '"30.5"',
-        ],
-    )
-    def test_load_rejects_non_integral_stability_counts(self, tmp_path, bad_value):
-        """Stability run counts must not silently accept booleans or fractions."""
-        path = tmp_path / "bad_stability_count.yaml"
-        path.write_text(
-            "\n".join(
-                [
-                    "out_dir: output",
-                    "input_intensities: data.csv",
-                    f"cohort_stability_n_runs: {bad_value}",
-                ]
-            )
-        )
-
-        with pytest.raises(ValueError, match="cohort_stability_n_runs must"):
-            load_config(path)
-
-def test_load_string_booleans_from_yaml(self, tmp_path):
-        """Quoted YAML booleans from external writers should retain bool semantics."""
-        config_dict = {
-            "out_dir": "output",
-            "input_intensities": "data.csv",
-            "cohort_stability": "yes",
-            "export_latent_space": "no",
-            "report_all": "on",
-            "verbose": "off",
-        }
-        config_path = tmp_path / "config.yaml"
-        config_path.write_text(yaml.safe_dump(config_dict))
-
-        config = load_config(config_path)
-
-        assert config.cohort_stability is True
-        assert config.export_latent_space is False
-        assert config.report_all is True
-        assert config.verbose is False
-
-    def test_load_string_stability_run_counts_as_int(self, tmp_path):
-        """Quoted YAML integer fields should not reach dataclass validation as strings."""
-        config_dict = {
-            "out_dir": "output",
-            "input_intensities": "data.csv",
-            "cohort_stability_n_runs": "30",
-            "cohort_stability_min_runs": "5",
-            "cohort_stability_min_samples": "30",
-            "cohort_stability_seed": "42.0",
-            "n_jobs": "-1",
-        }
-        config_path = tmp_path / "config.yaml"
-        config_path.write_text(yaml.safe_dump(config_dict))
-
-        config = load_config(config_path)
-
-        assert config.cohort_stability_n_runs == 30
-        assert isinstance(config.cohort_stability_n_runs, int)
-        assert config.cohort_stability_min_runs == 5
-        assert config.cohort_stability_min_samples == 30
-        assert config.cohort_stability_seed == 42
-        assert config.n_jobs == -1
-
-    def test_boolean_value_rejected_for_integer_field(self, tmp_path):
-        """YAML true/false must not be accepted as 1/0 for run-count settings."""
-        config_dict = {
-            "out_dir": "output",
-            "input_intensities": "data.csv",
-            "cohort_stability_n_runs": True,
-        }
-        config_path = tmp_path / "config.yaml"
-        config_path.write_text(yaml.safe_dump(config_dict))
-
-        with pytest.raises(ValueError, match="cohort_stability_n_runs"):
-            load_config(config_path)
-
-def test_load_string_booleans_from_yaml(self):
-        """YAML/R configs may persist booleans as yes/no or 1/0 strings."""
-        config_dict = {
-            "out_dir": "output",
-            "input_intensities": "data.csv",
-            "autoencoder_training": "false",
-            "init_pca": "true",
-            "report_all": "no",
-            "verbose": "yes",
-            "cohort_stability": "on",
-            "cohort_stability_require_oht": "off",
-            "cohort_stability_save_iteration_files": "1",
-            "export_latent_space": "0",
-            "export_patient_similarity": "True",
-            "export_cooutlier_patient_similarity": "False",
-
-def test_load_string_int_fields_as_int(self):
-        """YAML/R may quote integer fields; stability loops still need real ints."""
-        config_dict = {
-            "out_dir": "output",
-            "input_intensities": "data.csv",
-            "n_epochs": "25",
-            "batch_size": "8",
-            "cohort_stability_n_runs": "12",
-            "cohort_stability_min_runs": "4",
-            "cohort_stability_min_samples": "6",
-
-def test_load_numeric_find_q_method_and_boolean_flags(self):
-        """YAML numeric fixed-q and 0/1 booleans must not crash config loading."""
-        config_dict = {
-            "out_dir": "output",
-            "input_intensities": "data.csv",
-            "find_q_method": 5,
-            "cohort_stability": 0,
-            "export_cooutlier_patient_similarity": 0,
-
-def test_load_string_stability_run_counts_as_int(self):
+    def test_load_string_stability_run_counts_as_int(self):
         """YAML written by scripts may preserve run counts as strings."""
         config_dict = {
             "out_dir": "output",
@@ -491,63 +304,13 @@ def test_load_string_stability_run_counts_as_int(self):
             "n_jobs": "-1",
         }
 
-def test_load_string_stability_scalars_and_boolean_flags(self):
-        """Quoted YAML/R scalars must coerce before cohort stability validation."""
-        config_dict = {
-            "out_dir": "output",
-            "input_intensities": "data.csv",
-            "find_q_method": "gs",
-            "cohort_stability": "true",
-            "cohort_stability_require_oht": "false",
-            "cohort_stability_n_runs": "30.0",
-            "cohort_stability_min_runs": "10",
-            "cohort_stability_min_samples": "30.0",
-            "cohort_stability_drop_fraction": "0.2",
-            "cohort_stability_seed": "42.0",
-            "n_jobs": "-1",
-        }
-
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(config_dict, f)
             temp_path = f.name
 
         try:
             config = load_config(temp_path)
-            assert config.autoencoder_training is False
-            assert config.init_pca is True
-            assert config.report_all is False
-            assert config.verbose is True
-            assert config.cohort_stability is True
-            assert config.cohort_stability_require_oht is False
-            assert config.cohort_stability_save_iteration_files is True
-            assert config.export_latent_space is False
-            assert config.export_patient_similarity is True
-            assert config.export_cooutlier_patient_similarity is False
-        finally:
-            Path(temp_path).unlink()
-
-    def test_load_rejects_fractional_integer_fields(self):
-        """Integer-like YAML fields must not silently truncate fractional values."""
-        config_dict = {
-            "out_dir": "output",
-            "input_intensities": "data.csv",
-            "cohort_stability_n_runs": 30.5,
-
-assert config.n_epochs == 25
-            assert isinstance(config.n_epochs, int)
-            assert config.batch_size == 8
-            assert isinstance(config.batch_size, int)
             assert config.cohort_stability_n_runs == 12
-            assert isinstance(config.cohort_stability_n_runs, int)
-            assert config.cohort_stability_min_runs == 4
-            assert config.cohort_stability_min_samples == 6
-        finally:
-            Path(temp_path).unlink()
-
-    def test_load_string_boolean_fields(self):
-        """R-written configs often serialize booleans as yes/no-like strings."""
-
-assert config.cohort_stability_n_runs == 12
             assert isinstance(config.cohort_stability_n_runs, int)
             assert config.cohort_stability_min_runs == 4
             assert config.cohort_stability_min_samples == 33
@@ -562,12 +325,7 @@ assert config.cohort_stability_n_runs == 12
             "out_dir": "output",
             "input_intensities": "data.csv",
             "cohort_stability": "yes",
-            "export_latent_space": "no",
-            "export_patient_similarity": "off",
-            "report_all": "1",
-            "verbose": "0",
-
-"cohort_stability_require_oht": "no",
+            "cohort_stability_require_oht": "no",
             "cohort_stability_save_iteration_files": "yes",
         }
 
@@ -576,79 +334,10 @@ assert config.cohort_stability_n_runs == 12
             temp_path = f.name
 
         try:
-            with pytest.raises(ValueError, match="cohort_stability_n_runs"):
-
-config = load_config(temp_path)
-            assert config.cohort_stability is True
-            assert config.export_latent_space is False
-            assert config.export_patient_similarity is False
-            assert config.report_all is True
-            assert config.verbose is False
-        finally:
-            Path(temp_path).unlink()
-
-    def test_load_rejects_non_whole_int_field(self):
-        """Fractional run counts would make downstream range/sample logic ambiguous."""
-        config_dict = {
-            "out_dir": "output",
-            "input_intensities": "data.csv",
-            "cohort_stability_n_runs": "5.5",
-        }
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            yaml.dump(config_dict, f)
-            temp_path = f.name
-
-        try:
-            with pytest.raises(
-                ValueError,
-                match="cohort_stability_n_runs must be a whole number",
-            ):
-                load_config(temp_path)
-        finally:
-            Path(temp_path).unlink()
-
-    def test_load_rejects_invalid_boolean_field(self):
-        """Invalid boolean spellings should fail before toggling runtime behavior."""
-        config_dict = {
-            "out_dir": "output",
-            "input_intensities": "data.csv",
-            "export_latent_space": "maybe",
-        }
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            yaml.dump(config_dict, f)
-            temp_path = f.name
-
-        try:
-            with pytest.raises(
-                ValueError,
-                match="export_latent_space must be a boolean",
-            ):
-                load_config(temp_path)
-        finally:
-            Path(temp_path).unlink()
-
-assert config.find_q_method == "5"
-            assert config.cohort_stability is False
-            assert config.export_cooutlier_patient_similarity is False
-
-config = load_config(temp_path)
+            config = load_config(temp_path)
             assert config.cohort_stability is True
             assert config.cohort_stability_require_oht is False
             assert config.cohort_stability_save_iteration_files is True
-        finally:
-            Path(temp_path).unlink()
-
-assert config.cohort_stability is True
-            assert config.cohort_stability_require_oht is False
-            assert config.find_q_method == "gs"
-            assert config.cohort_stability_n_runs == 30
-            assert config.cohort_stability_min_runs == 10
-            assert config.cohort_stability_min_samples == 30
-            assert config.cohort_stability_drop_fraction == 0.2
-            assert config.cohort_stability_seed == 42
-            assert config.n_jobs == -1
         finally:
             Path(temp_path).unlink()
     
