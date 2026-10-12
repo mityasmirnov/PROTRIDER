@@ -41,8 +41,8 @@ skip_protrider_run <- identical(Sys.getenv("PROTRIDER_SKIP_RUN", "0"), "1")
 # Stability settings
 # ============================================================
 
-cohort_stability_n_runs <- 10      # start small for testing; later use 100
-cohort_stability_min_runs <- 10    # later use 30
+cohort_stability_n_runs <- 100      # start small for testing; later use 100
+cohort_stability_min_runs <- 30    # later use 30
 cohort_stability_drop_fraction <- 0.1
 cohort_stability_min_samples <- 30
 cohort_stability_seed <- 42
