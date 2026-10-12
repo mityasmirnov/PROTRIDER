@@ -92,6 +92,10 @@ def plot_all(ctx):
     plots.plot_cooutlier_patient_pca(out_dir, plot_title)
     plots.plot_cooutlier_patient_umap(out_dir, plot_title)
     plots.plot_cooutlier_patient_tsne(out_dir, plot_title)
+    plots.plot_volcano(out_dir, plot_title=plot_title)
+    plots.plot_intensity_rank(out_dir, plot_title=plot_title)
+    plots.plot_gene_sample_heatmap(out_dir, plot_title=plot_title)
+    plots.plot_cv_before_after(out_dir, plot_title=plot_title)
 
 
 @plot.command('pvals')
@@ -304,6 +308,95 @@ def plot_cooutlier_patient_tsne(ctx):
     plot_title = ctx.obj['plot_title']
     logger.info("plotting co-outlier patient t-SNE")
     plots.plot_cooutlier_patient_tsne(out_dir, plot_title)
+
+
+@plot.command('volcano')
+@click.option(
+    '--sample_id',
+    type=str,
+    default=None,
+    help="Sample ID for the volcano plot (default: first outlier sample)",
+)
+@click.option(
+    '--y_metric',
+    type=click.Choice(['pvalue', 'zscore'], case_sensitive=False),
+    default='pvalue',
+    help="Y-axis metric: pvalue (-log10) or zscore (|Z|)",
+)
+@click.pass_context
+def plot_volcano(ctx, sample_id: str, y_metric: str):
+    """
+    Plot volcano (effect vs p/z) for one sample — OUTRIDER plotVolcano analogue.
+    """
+    if ctx.obj is None:
+        return
+    out_dir = ctx.obj['out_dir']
+    plot_title = ctx.obj['plot_title']
+    logger.info("plotting volcano for sample %s", sample_id or "(default)")
+    plots.plot_volcano(
+        out_dir,
+        sample_id=sample_id,
+        plot_title=plot_title,
+        y_metric=y_metric.lower(),
+    )
+
+
+@plot.command('intensity_rank')
+@click.option(
+    '--protein_id',
+    type=str,
+    default=None,
+    help="Protein ID for the intensity rank plot (default: first outlier protein)",
+)
+@click.pass_context
+def plot_intensity_rank(ctx, protein_id: str):
+    """
+    Plot intensity rank for one protein — OUTRIDER plotExpressionRank analogue.
+    """
+    if ctx.obj is None:
+        return
+    out_dir = ctx.obj['out_dir']
+    plot_title = ctx.obj['plot_title']
+    logger.info("plotting intensity rank for protein %s", protein_id or "(default)")
+    plots.plot_intensity_rank(
+        out_dir, protein_id=protein_id, plot_title=plot_title
+    )
+
+
+@plot.command('gene_sample_heatmap')
+@click.option(
+    '--n_proteins',
+    type=int,
+    default=50,
+    help="Number of highest-CV proteins to include",
+)
+@click.pass_context
+def plot_gene_sample_heatmap(ctx, n_proteins: int):
+    """
+    Plot protein×sample heatmaps (raw + AE-normalized).
+    """
+    if ctx.obj is None:
+        return
+    out_dir = ctx.obj['out_dir']
+    plot_title = ctx.obj['plot_title']
+    logger.info("plotting gene-sample heatmaps (n_proteins=%s)", n_proteins)
+    plots.plot_gene_sample_heatmap(
+        out_dir, plot_title=plot_title, n_proteins=n_proteins
+    )
+
+
+@plot.command('cv_before_after')
+@click.pass_context
+def plot_cv_before_after(ctx):
+    """
+    Plot coefficient of variation before vs after AE (OUTRIDER BCV analogue).
+    """
+    if ctx.obj is None:
+        return
+    out_dir = ctx.obj['out_dir']
+    plot_title = ctx.obj['plot_title']
+    logger.info("plotting CV before/after AE")
+    plots.plot_cv_before_after(out_dir, plot_title=plot_title)
 
 
 @cli.command('run')
