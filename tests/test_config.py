@@ -491,6 +491,22 @@ def test_load_string_stability_run_counts_as_int(self):
             "n_jobs": "-1",
         }
 
+def test_load_string_stability_scalars_and_boolean_flags(self):
+        """Quoted YAML/R scalars must coerce before cohort stability validation."""
+        config_dict = {
+            "out_dir": "output",
+            "input_intensities": "data.csv",
+            "find_q_method": "gs",
+            "cohort_stability": "true",
+            "cohort_stability_require_oht": "false",
+            "cohort_stability_n_runs": "30.0",
+            "cohort_stability_min_runs": "10",
+            "cohort_stability_min_samples": "30.0",
+            "cohort_stability_drop_fraction": "0.2",
+            "cohort_stability_seed": "42.0",
+            "n_jobs": "-1",
+        }
+
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(config_dict, f)
             temp_path = f.name
@@ -621,6 +637,18 @@ config = load_config(temp_path)
             assert config.cohort_stability is True
             assert config.cohort_stability_require_oht is False
             assert config.cohort_stability_save_iteration_files is True
+        finally:
+            Path(temp_path).unlink()
+
+assert config.cohort_stability is True
+            assert config.cohort_stability_require_oht is False
+            assert config.find_q_method == "gs"
+            assert config.cohort_stability_n_runs == 30
+            assert config.cohort_stability_min_runs == 10
+            assert config.cohort_stability_min_samples == 30
+            assert config.cohort_stability_drop_fraction == 0.2
+            assert config.cohort_stability_seed == 42
+            assert config.n_jobs == -1
         finally:
             Path(temp_path).unlink()
     
