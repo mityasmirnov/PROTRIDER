@@ -501,7 +501,7 @@ def run(config: ProtriderConfig) -> Tuple[Result, ModelInfo, FitParameters, Grid
     model_was_loaded = False
     if checkpoint_path and checkpoint_path.exists():
         logger.info(f'Attempting to load model from {checkpoint_path}')
-        model, q = load_model(dataset, str(checkpoint_path), config)
+        model, q, frozen_fit_params = load_model(dataset, str(checkpoint_path), config)
         model_was_loaded = model is not None
     
     # 3. If model not loaded, find latent dim and initialize new model

@@ -24,6 +24,10 @@ __all__ = [
     "plot_patient_latent_pca",
     "plot_patient_latent_umap",
     "plot_patient_latent_tsne",
+    "plot_volcano",
+    "plot_intensity_rank",
+    "plot_gene_sample_heatmap",
+    "plot_cv_before_after",
 ]
 
 logger = logging.getLogger(__name__)
@@ -839,3 +843,461 @@ def plot_cooutlier_patient_tsne(
         default_title="Co-outlier patient t-SNE",
         embedding_df=cooutlier_patient_tsne,
     )
+
+
+def _read_protein_by_sample_matrix(path: Path) -> pd.DataFrame:
+    """Load a wide protein×sample CSV (proteinID index, sample columns)."""
+    df = pd.read_csv(path)
+    if "proteinID" in df.columns:
+        df = df.set_index("proteinID")
+    else:
+        df = df.set_index(df.columns[0])
+    return df
+
+
+def _load_protrider_summary(output_dir=None, protrider_summary=None) -> pd.DataFrame:
+    if protrider_summary is not None:
+        return protrider_summary.copy()
+    if output_dir is None:
+        raise ValueError("Either output_dir or protrider_summary must be provided")
+    summary_path = Path(output_dir) / "protrider_summary.csv"
+    if not summary_path.exists():
+        raise FileNotFoundError(f"protrider_summary.csv not found at {summary_path}")
+    return pd.read_csv(summary_path)
+
+
+def _default_sample_id(summary: pd.DataFrame) -> str:
+    if "PROTEIN_outlier" in summary.columns:
+        outliers = summary[summary["PROTEIN_outlier"].astype(bool)]
+        if len(outliers) > 0:
+            return str(outliers["sampleID"].iloc[0])
+    return str(summary["sampleID"].iloc[0])
+
+
+def _default_protein_id(summary: pd.DataFrame) -> str:
+    if "PROTEIN_outlier" in summary.columns:
+        outliers = summary[summary["PROTEIN_outlier"].astype(bool)]
+        if len(outliers) > 0:
+            return str(outliers["proteinID"].iloc[0])
+    return str(summary["proteinID"].iloc[0])
+
+
+def _protein_cv(matrix: pd.DataFrame) -> pd.Series:
+    """Coefficient of variation per protein (columns = samples)."""
+    values = matrix.astype(float)
+    means = values.mean(axis=1, skipna=True).abs()
+    stds = values.std(axis=1, skipna=True, ddof=0)
+    cv = stds / means.replace(0, np.nan)
+    return cv.replace([np.inf, -np.inf], np.nan).dropna()
+
+
+def plot_volcano(
+    output_dir=None,
+    sample_id=None,
+    plot_title="",
+    fontsize=10,
+    y_metric="pvalue",
+    protrider_summary=None,
+):
+    """
+    Volcano plot for one sample (OUTRIDER plotVolcano analogue).
+
+    X is effect size (PROTEIN_LOG2FC). Y is either -log10(p-value) or |z-score|.
+
+    Args:
+        output_dir: Directory to save plots under plots/. Optional if DataFrame given.
+        sample_id: Sample to plot. Defaults to first outlier sample, else first sample.
+        plot_title: Optional title suffix.
+        fontsize: Base font size.
+        y_metric: "pvalue" (default) or "zscore".
+        protrider_summary: Optional long-format summary DataFrame.
+
+    Returns:
+        plotnine plot object, or None if inputs are missing.
+    """
+    try:
+        summary = _load_protrider_summary(output_dir, protrider_summary)
+    except (ValueError, FileNotFoundError) as exc:
+        logger.warning("Skipping volcano plot: %s", exc)
+        return None
+
+    if sample_id is None:
+        sample_id = _default_sample_id(summary)
+
+    df = summary[summary["sampleID"].astype(str) == str(sample_id)].copy()
+    if df.empty:
+        logger.warning("Skipping volcano plot: sample_id %s not found", sample_id)
+        return None
+
+    required = {"PROTEIN_LOG2FC", "PROTEIN_PVALUE", "PROTEIN_ZSCORE"}
+    missing = required - set(df.columns)
+    if missing:
+        logger.warning("Skipping volcano plot: missing columns %s", sorted(missing))
+        return None
+
+    df = df.dropna(subset=["PROTEIN_LOG2FC", "PROTEIN_PVALUE", "PROTEIN_ZSCORE"])
+    if df.empty:
+        logger.warning("Skipping volcano plot: no finite values for sample %s", sample_id)
+        return None
+
+    if y_metric == "zscore":
+        df["y_value"] = df["PROTEIN_ZSCORE"].abs()
+        y_label = "|Z-score|"
+    elif y_metric == "pvalue":
+        p = df["PROTEIN_PVALUE"].clip(lower=np.finfo(float).tiny)
+        df["y_value"] = -np.log10(p)
+        y_label = "-log10(P-value)"
+    else:
+        raise ValueError("y_metric must be 'pvalue' or 'zscore'")
+
+    if "PROTEIN_outlier" in df.columns:
+        df["status"] = np.where(
+            df["PROTEIN_outlier"].astype(bool), "Outlier", "Non-outlier"
+        )
+    else:
+        df["status"] = "Non-outlier"
+
+    title = plot_title or f"Volcano: {sample_id}"
+    p_out = (
+        pn.ggplot(df, pn.aes(x="PROTEIN_LOG2FC", y="y_value", color="status"))
+        + pn.geom_point(alpha=0.7, size=1.5)
+        + pn.scale_color_manual(values={"Outlier": "#d62728", "Non-outlier": "#1f77b4"})
+        + pn.labs(
+            x="log2 fold change",
+            y=y_label,
+            color="",
+            title=title,
+        )
+        + pn.theme_bw(base_size=fontsize)
+    )
+
+    if output_dir is not None:
+        out = Path(output_dir)
+        os.makedirs(out / "plots", exist_ok=True)
+        p_out.save(
+            out / "plots" / "volcano.png",
+            width=6,
+            height=4,
+            units="in",
+            dpi=300,
+        )
+        logger.info("Saved volcano plot to %s", out / "plots" / "volcano.png")
+
+    return p_out
+
+
+def plot_intensity_rank(
+    output_dir=None,
+    protein_id=None,
+    plot_title="",
+    fontsize=10,
+    protrider_summary=None,
+):
+    """
+    Intensity rank plot for one protein (OUTRIDER plotExpressionRank analogue).
+
+    Samples are ranked by observed log-intensity; outliers are highlighted.
+
+    Returns:
+        plotnine plot object, or None if inputs are missing.
+    """
+    try:
+        summary = _load_protrider_summary(output_dir, protrider_summary)
+    except (ValueError, FileNotFoundError) as exc:
+        logger.warning("Skipping intensity rank plot: %s", exc)
+        return None
+
+    if protein_id is None:
+        protein_id = _default_protein_id(summary)
+
+    df = summary[summary["proteinID"].astype(str) == str(protein_id)].copy()
+    if df.empty:
+        logger.warning(
+            "Skipping intensity rank plot: protein_id %s not found", protein_id
+        )
+        return None
+
+    intensity_col = None
+    for candidate in ("PROTEIN_LOG2INT", "PROTEIN_INT", "PROTEIN_EXPECTED_LOG2INT"):
+        if candidate in df.columns:
+            intensity_col = candidate
+            break
+    if intensity_col is None:
+        logger.warning(
+            "Skipping intensity rank plot: no intensity column in protrider_summary"
+        )
+        return None
+
+    df = df.dropna(subset=[intensity_col]).sort_values(intensity_col)
+    if df.empty:
+        logger.warning(
+            "Skipping intensity rank plot: no finite intensities for %s", protein_id
+        )
+        return None
+
+    df = df.reset_index(drop=True)
+    df["Rank"] = df.index + 1
+    if "PROTEIN_outlier" in df.columns:
+        df["status"] = np.where(
+            df["PROTEIN_outlier"].astype(bool), "Outlier", "Non-outlier"
+        )
+    else:
+        df["status"] = "Non-outlier"
+
+    title = plot_title or f"Intensity rank: {protein_id}"
+    p_out = (
+        pn.ggplot(df, pn.aes(x="Rank", y=intensity_col, color="status"))
+        + pn.geom_point(size=2)
+        + pn.scale_color_manual(values={"Outlier": "#d62728", "Non-outlier": "#1f77b4"})
+        + pn.labs(
+            x="Sample rank",
+            y=intensity_col.replace("_", " "),
+            color="",
+            title=title,
+        )
+        + pn.theme_bw(base_size=fontsize)
+    )
+
+    if output_dir is not None:
+        out = Path(output_dir)
+        os.makedirs(out / "plots", exist_ok=True)
+        p_out.save(
+            out / "plots" / "intensity_rank.png",
+            width=6,
+            height=4,
+            units="in",
+            dpi=300,
+        )
+        logger.info(
+            "Saved intensity rank plot to %s", out / "plots" / "intensity_rank.png"
+        )
+
+    return p_out
+
+
+def plot_gene_sample_heatmap(
+    output_dir=None,
+    plot_title="",
+    n_proteins=50,
+    processed_input=None,
+    output_data=None,
+):
+    """
+    Protein×sample heatmaps for raw (processed input) and AE-normalized output.
+
+    Analogue of OUTRIDER plotCountGeneSampleHeatmap. Selects the top ``n_proteins``
+    by coefficient of variation on the processed input when more proteins are present.
+
+    Returns:
+        tuple of (raw_plot, normalized_plot), either may be None.
+    """
+    out = Path(output_dir) if output_dir is not None else None
+
+    if processed_input is None:
+        if out is None:
+            raise ValueError("Either output_dir or processed_input must be provided")
+        raw_path = out / "processed_input.csv"
+        if not raw_path.exists():
+            logger.warning(
+                "Skipping gene-sample heatmap: %s not found", raw_path
+            )
+            return None, None
+        processed_input = _read_protein_by_sample_matrix(raw_path)
+    else:
+        processed_input = processed_input.copy()
+        if "proteinID" in getattr(processed_input, "columns", []):
+            processed_input = processed_input.set_index("proteinID")
+
+    if output_data is None and out is not None:
+        norm_path = out / "output.csv"
+        if norm_path.exists():
+            output_data = _read_protein_by_sample_matrix(norm_path)
+        else:
+            logger.warning(
+                "Normalized output.csv not found; plotting raw heatmap only"
+            )
+    elif output_data is not None:
+        output_data = output_data.copy()
+        if "proteinID" in getattr(output_data, "columns", []):
+            output_data = output_data.set_index("proteinID")
+
+    if out is None:
+        raise ValueError("output_dir is required to save gene-sample heatmaps")
+
+    os.makedirs(out / "plots", exist_ok=True)
+
+    cv = _protein_cv(processed_input)
+    if len(cv) == 0:
+        logger.warning("Skipping gene-sample heatmap: no finite CV values")
+        return None, None
+
+    top_ids = cv.sort_values(ascending=False).head(n_proteins).index
+    raw_sub = processed_input.loc[processed_input.index.isin(top_ids)].astype(float)
+
+    raw_plot = None
+    norm_plot = None
+
+    try:
+        g = sns.clustermap(
+            raw_sub.fillna(raw_sub.median(axis=0)),
+            cmap="mako",
+            figsize=(8, max(4, len(raw_sub) * 0.12 + 2)),
+            col_cluster=True,
+            row_cluster=True,
+        )
+        title = plot_title or "Protein × sample (processed input)"
+        g.fig.suptitle(title)
+        g.savefig(out / "plots" / "gene_sample_heatmap_raw.png", dpi=300, bbox_inches="tight")
+        raw_plot = g
+        plt.close("all")
+        logger.info(
+            "Saved raw gene-sample heatmap to %s",
+            out / "plots" / "gene_sample_heatmap_raw.png",
+        )
+    except Exception as exc:
+        logger.warning("Raw clustermap failed (%s); falling back to heatmap", exc)
+        fig, ax = plt.subplots(figsize=(8, 6))
+        sns.heatmap(raw_sub, cmap="mako", ax=ax)
+        ax.set_title(plot_title or "Protein × sample (processed input)")
+        fig.savefig(
+            out / "plots" / "gene_sample_heatmap_raw.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
+        raw_plot = fig
+        plt.close("all")
+
+    if output_data is not None:
+        shared = raw_sub.index.intersection(output_data.index)
+        if len(shared) > 0:
+            norm_sub = output_data.loc[shared].astype(float)
+            try:
+                g = sns.clustermap(
+                    norm_sub.fillna(norm_sub.median(axis=0)),
+                    cmap="mako",
+                    figsize=(8, max(4, len(norm_sub) * 0.12 + 2)),
+                    col_cluster=True,
+                    row_cluster=True,
+                )
+                title = plot_title or "Protein × sample (AE output)"
+                g.fig.suptitle(title)
+                g.savefig(
+                    out / "plots" / "gene_sample_heatmap_normalized.png",
+                    dpi=300,
+                    bbox_inches="tight",
+                )
+                norm_plot = g
+                plt.close("all")
+                logger.info(
+                    "Saved normalized gene-sample heatmap to %s",
+                    out / "plots" / "gene_sample_heatmap_normalized.png",
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Normalized clustermap failed (%s); falling back to heatmap", exc
+                )
+                fig, ax = plt.subplots(figsize=(8, 6))
+                sns.heatmap(norm_sub, cmap="mako", ax=ax)
+                ax.set_title(plot_title or "Protein × sample (AE output)")
+                fig.savefig(
+                    out / "plots" / "gene_sample_heatmap_normalized.png",
+                    dpi=300,
+                    bbox_inches="tight",
+                )
+                norm_plot = fig
+                plt.close("all")
+
+    return raw_plot, norm_plot
+
+
+def plot_cv_before_after(
+    output_dir=None,
+    plot_title="",
+    fontsize=10,
+    processed_input=None,
+    residuals=None,
+):
+    """
+    Coefficient of variation before vs after AE (OUTRIDER BCV analogue).
+
+    Before: CV of processed input intensities per protein.
+    After: CV of AE residuals per protein (residual std / |mean input|).
+
+    Returns:
+        plotnine plot object, or None if inputs are missing.
+    """
+    out = Path(output_dir) if output_dir is not None else None
+
+    if processed_input is None:
+        if out is None:
+            raise ValueError("Either output_dir or processed_input must be provided")
+        raw_path = out / "processed_input.csv"
+        if not raw_path.exists():
+            logger.warning("Skipping CV before/after plot: %s not found", raw_path)
+            return None
+        processed_input = _read_protein_by_sample_matrix(raw_path)
+    else:
+        processed_input = processed_input.copy()
+        if "proteinID" in getattr(processed_input, "columns", []):
+            processed_input = processed_input.set_index("proteinID")
+
+    if residuals is None:
+        if out is None:
+            raise ValueError("Either output_dir or residuals must be provided")
+        res_path = out / "residuals.csv"
+        if not res_path.exists():
+            logger.warning("Skipping CV before/after plot: %s not found", res_path)
+            return None
+        residuals = _read_protein_by_sample_matrix(res_path)
+    else:
+        residuals = residuals.copy()
+        if "proteinID" in getattr(residuals, "columns", []):
+            residuals = residuals.set_index("proteinID")
+
+    before_cv = _protein_cv(processed_input)
+    means = processed_input.astype(float).mean(axis=1, skipna=True).abs().replace(0, np.nan)
+    shared = before_cv.index.intersection(residuals.index).intersection(means.index)
+    if len(shared) == 0:
+        logger.warning("Skipping CV before/after plot: no shared proteins")
+        return None
+
+    after_std = residuals.loc[shared].astype(float).std(axis=1, skipna=True, ddof=0)
+    after_cv = (after_std / means.loc[shared]).replace([np.inf, -np.inf], np.nan).dropna()
+    before_cv = before_cv.loc[after_cv.index]
+
+    cv_df = pd.concat(
+        [
+            pd.DataFrame({"when": "Before", "CV": before_cv.values}),
+            pd.DataFrame({"when": "After", "CV": after_cv.values}),
+        ],
+        ignore_index=True,
+    )
+    cv_df["when"] = pd.Categorical(cv_df["when"], categories=["Before", "After"])
+
+    title = plot_title or "Coefficient of variation before/after AE"
+    p_out = (
+        pn.ggplot(cv_df, pn.aes(x="when", y="CV"))
+        + pn.geom_boxplot(fill="#aec7e8")
+        + pn.labs(
+            x="Autoencoder correction",
+            y="Coefficient of variation",
+            title=title,
+        )
+        + pn.theme_bw(base_size=fontsize)
+    )
+
+    if out is not None:
+        os.makedirs(out / "plots", exist_ok=True)
+        p_out.save(
+            out / "plots" / "cv_before_after.png",
+            width=5,
+            height=4,
+            units="in",
+            dpi=300,
+        )
+        logger.info(
+            "Saved CV before/after plot to %s", out / "plots" / "cv_before_after.png"
+        )
+
+    return p_out
+
