@@ -343,3 +343,50 @@ def _false_discovery_control(ps, *, axis=0, method='bh'):
     ps = np.moveaxis(ps, -1, axis)
 
     return np.clip(ps, 0, 1)
+
+
+NB_THETA_GRID = np.logspace(-1, 4, 61)
+
+
+def init_nb_theta(counts, mu, mask):
+    """Moment estimate of the NB dispersion per gene around the means ``mu`` (starting value for the joint fit), clipped to [0.1, 1e4]."""
+    from numpy import nansum
+    k = np.where(mask, np.nan, counts)
+    m = np.where(mask, np.nan, mu)
+    excess = nansum((k - m) ** 2 - m, axis=0)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        theta = np.where(excess > 0, nansum(m ** 2, axis=0) / np.where(excess > 0, excess, 1.0), 100.0)
+    return np.clip(theta, 0.1, 1e4)
+
+
+def fit_nb_theta_ml(counts, mu, mask, grid=NB_THETA_GRID):
+    """Per-gene NB maximum-likelihood dispersion given the fitted means, on a log grid (as OUTRIDER fits theta per gene)."""
+    from scipy.special import gammaln
+    k = np.where(mask, 0.0, counts)
+    m = np.clip(mu, 1e-6, None)
+    w = (~mask).astype(float)
+    ll = np.empty((len(grid), k.shape[1]))
+    for j, t in enumerate(grid):
+        ll[j] = (w * (gammaln(k + t) - gammaln(t) + t * np.log(t / (t + m)) + k * np.log(m / (t + m)))).sum(axis=0)
+    return grid[ll.argmax(axis=0)]
+
+
+def get_pvals_nb(counts, mu, theta, mask, how='two-sided'):
+    """NB p-values of raw counts given means and per-gene dispersions; NaN where the cell is missing."""
+    from scipy.stats import nbinom
+    hows = ('two-sided', 'left', 'right')
+    if how not in hows:
+        raise ValueError(f'Method should be in <{hows}>')
+    k = np.rint(np.where(mask, 0.0, counts)).astype(np.int64)
+    m = np.clip(mu, 1e-6, None)
+    th = theta[None, :]
+    p_nb = th / (th + m)
+    left = nbinom.cdf(k, th, p_nb)
+    right = np.where(k > 0, nbinom.sf(k - 1, th, p_nb), 1.0)
+    if how == 'left':
+        p = left
+    elif how == 'right':
+        p = right
+    else:
+        p = np.clip(2.0 * np.minimum(left, right), 0.0, 1.0)
+    return np.where(mask, np.nan, p)

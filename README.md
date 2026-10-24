@@ -86,6 +86,7 @@ An example dataset is included under `sample_data/`.
 | `cov_used` | List of covariate column names from the annotation file (optional) |
 | `find_q_method` | Method to determine latent dimension: `OHT` (default), `gs`, `bs` (binary search), or an integer |
 | `pval_dist` | Distribution for p-value calculation: `t` (default) or `gaussian` |
+| `likelihood` | `gaussian` (default: log intensities, MSE) or `nb`: the input is a matrix of **raw counts** (RNA-seq style, zeros are observations), the autoencoder is fitted with a negative-binomial likelihood (one dispersion per gene, learned jointly) and outliers are scored with the NB test on the fitted means, an OUTRIDER-style caller in Python. Use `find_q_method: OHT` or a fixed integer (not `gs` / `bs`) and `lr: 1e-3` with a few thousand epochs; `pval_dist` does not apply |
 | `n_epochs` | Number of training epochs (default: `100`) |
 | `checkpoint_path` | Path to save/load model checkpoint (optional) |
 | `cohort_stability` | Run subsampling-based cohort stability analysis after the full cohort (default: `false`) |

@@ -9,7 +9,7 @@ from abc import ABC
 from optht import optht
 import logging
 from .covariates import NoValidCovariatesError, parse_covariates
-from .protein_intensities import read_protein_intensities, preprocess_protein_intensities
+from .protein_intensities import read_protein_intensities, preprocess_protein_intensities, preprocess_counts
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ class ProtriderDataset(Dataset, PCADataset):
                  sa_file: Optional[str] = None,
                  cov_used: Optional[list] = None, log_func: Callable = np.log,
                  maxNA_filter: float = 0.3, device: torch.device = torch.device('cpu'),
-                 input_format: str = "proteins_as_rows"):
+                 input_format: str = "proteins_as_rows", likelihood: str = "gaussian"):
         """Initialize ProtriderDataset.
         
         Args:
@@ -53,15 +53,20 @@ class ProtriderDataset(Dataset, PCADataset):
             input_format: Format of input file:
                          - "proteins_as_rows": proteins are rows, samples are columns (default)
                          - "proteins_as_columns": samples are rows, proteins are columns
+            likelihood: "gaussian" (log intensities, MSE) or "nb" (raw counts, negative-binomial likelihood; the input is log((k + 1) / s))
         """
         super().__init__()
         self.device = device
+        self.likelihood = likelihood
 
-        # Read and preprocess protein intensities
+        # Read and preprocess protein intensities (or counts)
         unfiltered_data = read_protein_intensities(input_intensities, index_col, input_format)
-        self.data, self.raw_data, self.size_factors = preprocess_protein_intensities(
-            unfiltered_data, log_func, maxNA_filter
-        )
+        if likelihood == "nb":
+            self.data, self.raw_data, self.size_factors = preprocess_counts(unfiltered_data, maxNA_filter)
+        else:
+            self.data, self.raw_data, self.size_factors = preprocess_protein_intensities(
+                unfiltered_data, log_func, maxNA_filter
+            )
 
         # Read and preprocess covariates
         if sa_file is not None and cov_used is not None:
@@ -107,11 +112,20 @@ class ProtriderDataset(Dataset, PCADataset):
         self.prot_means_torch = self.prot_means_torch.to(device)
         # self.presence = (~self.torch_mask).long()
 
+        if likelihood == "nb":  # raw counts and log size factors: what the negative-binomial loss needs next to the log input
+            self.counts = torch.tensor(np.nan_to_num(self.raw_data.to_numpy(dtype=float)), dtype=torch.float64).to(device)
+            self.log_sf = torch.tensor(np.log(np.asarray(self.size_factors, dtype=float)), dtype=torch.float64).to(device)
+
     def __len__(self):
         return len(self.X)
 
+    def nb_extras(self):
+        """(counts, log size factors) for the negative-binomial loss, () for the Gaussian one."""
+        return (self.counts, self.log_sf) if self.likelihood == "nb" else ()
+
     def __getitem__(self, idx):
-        return (self.X[idx], self.torch_mask[idx], self.covariates[idx], self.prot_means_torch)
+        item = (self.X[idx], self.torch_mask[idx], self.covariates[idx], self.prot_means_torch)
+        return item + (self.counts[idx], self.log_sf[idx]) if self.likelihood == "nb" else item
 
 
 class ProtriderSubset(Subset, PCADataset):
@@ -123,6 +137,13 @@ class ProtriderSubset(Subset, PCADataset):
     @property
     def X(self):
         return self.dataset.X[self.indices]
+
+    @property
+    def likelihood(self):
+        return self.dataset.likelihood
+
+    def nb_extras(self):
+        return (self.dataset.counts[self.indices], self.dataset.log_sf[self.indices]) if self.dataset.likelihood == "nb" else ()
 
     @property
     def data(self):

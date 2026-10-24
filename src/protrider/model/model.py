@@ -182,7 +182,8 @@ class ProtriderAutoencoder(nn.Module):
             torch.cat([Vt_q.to(device), cov_enc_init.to(device)], dim=1)
         )
 
-        enc_layer.bias.data.copy_(-(Vt_q @ torch.from_numpy(prot_means).to(device).T).flatten())
+        if enc_layer.bias is not None:  # without a bias the encoder centres its input itself (prot_means given, see init_model(center_input=True))
+            enc_layer.bias.data.copy_(-(Vt_q @ torch.from_numpy(prot_means).to(device).T).flatten())
 
         ## DECODER weights: (n_prots, q + n_cov), bias: (n_prot)
         dec_layer.bias.data.copy_(torch.from_numpy(prot_means).squeeze(0))
@@ -228,6 +229,31 @@ class MSEBCELoss(nn.Module):
         return loss, mse_loss, bce_loss
 
 
+class NBLoss(nn.Module):
+    """Negative-binomial negative log-likelihood of raw counts (research use).
+
+    The autoencoder output is the log mean of the size-factor-normalised counts, so mu = exp(output) * s. One dispersion theta per gene is
+    learned jointly with the weights (log scale, clamped to [0.01, 1e5]). Cells flagged as missing in the mask are left out. Returns
+    ``(loss, nll, None)`` like MSEBCELoss, so the training and inference code is shared.
+    """
+
+    def __init__(self, init_theta):
+        super().__init__()
+        self.log_theta = nn.Parameter(torch.log(torch.as_tensor(init_theta, dtype=torch.float64).clone()))
+
+    def forward(self, x_hat, x, mask, counts, log_sf, detached=False):
+        eta = torch.clamp(x_hat + log_sf.unsqueeze(1), -30.0, 30.0)
+        log_th = torch.clamp(self.log_theta, float(np.log(0.01)), float(np.log(1e5)))
+        th = torch.exp(log_th)
+        log_th_mu = torch.logaddexp(log_th.expand_as(eta), eta)
+        ll = (torch.lgamma(counts + th) - torch.lgamma(th) - torch.lgamma(counts + 1.0)
+              + th * (log_th - log_th_mu) + counts * (eta - log_th_mu))
+        nll = torch.where(mask, torch.nan, -ll).nanmean()
+        if detached:
+            nll = nll.detach().cpu().numpy()
+        return nll, nll, None
+
+
 def train(dataset, model, criterion, n_epochs=100, learning_rate=1e-3, batch_size=None, wandb=None, patience=50, min_delta=1e-4):
     # start data;pader
     if batch_size is None:
@@ -236,7 +262,7 @@ def train(dataset, model, criterion, n_epochs=100, learning_rate=1e-3, batch_siz
                                               batch_size=batch_size,
                                               shuffle=True)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(list(model.parameters()) + list(criterion.parameters()), lr=learning_rate)  # criterion.parameters(): the NB dispersions
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=patience // 4)
     train_losses = []
     min_train_loss = float('inf')
@@ -278,13 +304,13 @@ def _train_iteration(data_loader, model, criterion, optimizer):
 
     n_batches = 0
     for batch_idx, data in enumerate(data_loader):
-        x, mask, cov, prot_means = data
+        x, mask, cov, prot_means, *extra = data  # extra: counts and log size factors for the NB loss
 
         # restore grads and compute model out
         optimizer.zero_grad()
         x_hat = model(x, mask, cond=cov)
 
-        loss, mse_loss, bce_loss = criterion(x_hat, x, mask)
+        loss, mse_loss, bce_loss = criterion(x_hat, x, mask, *extra)
 
         # Adjust learning weights
         loss.backward()

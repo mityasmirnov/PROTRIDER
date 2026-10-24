@@ -4,6 +4,9 @@
 
 ### Added
 
+- `likelihood: nb`: negative-binomial autoencoder for raw count matrices (an OUTRIDER-style caller). Median-of-ratios size factors, input log((k + 1) / s), decoder output = log mean of the normalised counts (mu = exp(output) * s), NB negative log-likelihood with one dispersion per gene learned jointly (`NBLoss`), encoder input centred on the gene means. Scoring: NB p-values on the fitted means with the per-gene maximum-likelihood dispersion (grid), z = log2 fold change / gene SD, `Result.df_expected_counts` (and `expected_counts.csv`). `find_q_method` is `OHT` or a fixed integer. The Gaussian default is unchanged.
+- Tests: `tests/test_nb_likelihood.py`.
+
 - Co-outlier patient stratification based on directional Jaccard overlap of extreme Z-scores.
 - Module `src/protrider/cooutlier_similarity.py`.
 - New outputs: `cooutlier_patient_similarity.csv`, `cooutlier_patient_subpopulations.csv`, `cooutlier_patient_burden.csv`, `cooutlier_patient_pca.csv`, `cooutlier_patient_umap.csv`, `cooutlier_patient_tsne.csv`, `cooutlier_patient_info.csv`.

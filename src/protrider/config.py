@@ -71,6 +71,10 @@ class ProtriderConfig:
     
     # Statistical params
     pval_dist: Literal["gaussian", "t"] = "t"
+    # "nb": the input is a matrix of raw counts (RNA-seq style, zeros are observations); the autoencoder is fitted with a negative-binomial
+    # likelihood (one dispersion per gene) and outliers are scored with the NB test on the fitted means (an OUTRIDER-style caller). p-values
+    # then come from the NB test, so pval_dist does not apply. "gaussian" (default) is the log-intensity / MSE model of PROTRIDER.
+    likelihood: Literal["gaussian", "nb"] = "gaussian"
     pval_adj: Literal["by", "bh"] = "by"
     pval_sided: Literal["two-sided", "left", "right"] = "two-sided"
     pseudocount: float = 0.01
@@ -141,6 +145,11 @@ class ProtriderConfig:
         if self.find_q_method not in ["OHT", "gs", "bs"] and not self.find_q_method.isdigit():
             raise ValueError("find_q_method must be 'OHT', 'gs', 'bs' or an integer string")
         
+        if self.likelihood == "nb":
+            if self.find_q_method not in ("OHT",) and not self.find_q_method.isdigit():
+                raise ValueError("likelihood='nb' supports find_q_method 'OHT' or a fixed integer (the 'gs' / 'bs' searches inject outliers on the log scale)")
+            if self.presence_absence:
+                raise ValueError("likelihood='nb' does not support presence_absence")
         if self.presence_absence and self.n_layers != 1:
             import warnings
             warnings.warn("Presence absence modeling is only validated with n_layers=1")

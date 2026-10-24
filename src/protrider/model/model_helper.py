@@ -182,11 +182,13 @@ def find_latent_dim(dataset: ProtriderDataset, method='OHT',
 
 
 def init_model(dataset, latent_dim, init_wPCA=True, n_layer=1, h_dim=None, device=torch.device('cpu'),
-               presence_absence=False):
+               presence_absence=False, center_input=False):
+    """center_input: the encoder subtracts the gene means from its input (no encoder bias) even with the PCA initialisation. Same function as the
+    default (the bias is -Vt @ means), but the optimiser sees centred inputs; needed for the NB likelihood with thousands of genes at lr 1e-3."""
     n_cov = dataset.covariates.shape[1]
     n_prots = dataset.X.shape[1]
     model = ProtriderAutoencoder(in_dim=n_prots, latent_dim=latent_dim, n_layers=n_layer, h_dim=h_dim, n_cov=n_cov,
-                                 prot_means=None if init_wPCA else dataset.prot_means_torch,
+                                 prot_means=None if (init_wPCA and not center_input) else dataset.prot_means_torch,
                                  presence_absence=presence_absence)
     model.double().to(device)
     if init_wPCA:

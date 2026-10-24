@@ -49,6 +49,29 @@ def read_protein_intensities(input_intensities: str, index_col: str, input_forma
 
     return data
 
+def preprocess_counts(data, maxNA_filter):
+    """Preprocess a matrix of raw counts (samples x genes) for the negative-binomial likelihood.
+
+    Zeros are observations (unlike intensities); NaN is missing. Genes with more than ``maxNA_filter`` missing are dropped. Size factors are the
+    median of ratios (pydeseq2). The autoencoder input is log((k + 1) / s).
+
+    Returns:
+        tuple: log((k + 1) / s) input, filtered raw counts, size factors (np.ndarray, one per sample)
+    """
+    filtered = np.mean(np.isnan(data), axis=0)
+    data = data.loc[:, filtered <= maxNA_filter]
+    logger.info(f"Filtering out {int(np.sum(filtered > maxNA_filter))} genes with too many missing values. New shape: {data.shape}")
+    raw = data.copy()
+    _, sf = deseq2_norm(raw.fillna(0))
+    sf = np.asarray(sf, dtype=float).reshape(-1)
+    if not np.all(np.isfinite(sf)) or np.any(sf <= 0):
+        logger.warning("Median-of-ratios size factors failed (no gene with all counts > 0?); using total-count size factors")
+        tot = raw.fillna(0).sum(axis=1).to_numpy(float)
+        sf = tot / np.exp(np.mean(np.log(tot)))
+    log_data = np.log((raw + 1.0).div(sf, axis=0))
+    return log_data, raw, sf
+
+
 def preprocess_protein_intensities(data, log_func, maxNA_filter):
     """Preprocess protein intensities data.
 

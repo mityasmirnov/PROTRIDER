@@ -6,9 +6,9 @@ import torch
 from dataclasses import dataclass
 from pathlib import Path
 
-from .model import train, MSEBCELoss, ProtriderAutoencoder, find_latent_dim, init_model, ModelInfo, GridSearchResult
+from .model import train, MSEBCELoss, NBLoss, ProtriderAutoencoder, find_latent_dim, init_model, ModelInfo, GridSearchResult
 from .datasets import ProtriderDataset, ProtriderSubset
-from .stats import get_pvals, fit_residuals, adjust_pvals, FitParameters
+from .stats import get_pvals, fit_residuals, adjust_pvals, FitParameters, init_nb_theta, fit_nb_theta_ml, get_pvals_nb
 from .config import ProtriderConfig
 from .latent import LatentSpace, extract_latent_space
 from .patient_similarity import PatientSimilarity, compute_patient_similarity
@@ -136,6 +136,7 @@ class Result:
     latent_space: Optional[LatentSpace] = None
     patient_similarity: Optional[PatientSimilarity] = None
     cooutlier_similarity: Optional[CoOutlierSimilarity] = None
+    df_expected_counts: Optional[pd.DataFrame] = None  # likelihood='nb': fitted mean counts (mu = exp(output) * size factor)
 
     def to_long_df(self, include_all: bool = False) -> pd.DataFrame:
         """
@@ -241,6 +242,11 @@ class Result:
             out_p = f'{out_dir}/log2fc.csv'
             self.log2fc.T.to_csv(out_p, header=True, index=True)
             logger.info(f"Saved log2fc scores to {out_p}")
+
+            if self.df_expected_counts is not None:
+                out_p = f'{out_dir}/expected_counts.csv'
+                self.df_expected_counts.T.to_csv(out_p, header=True, index=True)
+                logger.info(f"Saved expected counts to {out_p}")
 
             # fc
             out_p = f'{out_dir}/fc.csv'
@@ -484,7 +490,8 @@ def run(config: ProtriderConfig) -> Tuple[Result, ModelInfo, FitParameters, Grid
                                log_func=config.log_func,
                                maxNA_filter=config.max_allowed_NAs_per_protein,
                                device=config.device_torch,
-                               input_format=config.input_format)
+                               input_format=config.input_format,
+                               likelihood=config.likelihood)
 
     # 2. Determine checkpoint path and try to load existing model
     model = None
@@ -540,13 +547,20 @@ def run(config: ProtriderConfig) -> Tuple[Result, ModelInfo, FitParameters, Grid
                            n_layer=config.n_layers,
                            h_dim=config.h_dim,
                            device=config.device_torch,
-                           presence_absence=config.presence_absence if config.n_layers == 1 else False
+                           presence_absence=config.presence_absence if config.n_layers == 1 else False,
+                           center_input=config.likelihood == "nb"
                            )
     else:
         logger.info(f'Using loaded model with q={q}')
     
-    criterion = MSEBCELoss(
-        presence_absence=config.presence_absence, lambda_bce=config.lambda_presence_absence)
+    if config.likelihood == "nb":
+        with torch.no_grad():  # starting dispersions: moments around the initial fit
+            X0 = model(dataset.X, dataset.torch_mask, cond=dataset.covariates).detach().cpu().numpy()
+        mu0 = np.exp(X0) * np.exp(dataset.log_sf.cpu().numpy())[:, None]
+        criterion = NBLoss(init_nb_theta(dataset.raw_data.to_numpy(dtype=float), mu0, dataset.mask)).to(config.device_torch)
+    else:
+        criterion = MSEBCELoss(
+            presence_absence=config.presence_absence, lambda_bce=config.lambda_presence_absence)
     logger.info('Model:\n%s', model)
     logger.info('Device: %s', config.device_torch)
 
@@ -604,48 +618,53 @@ def run(config: ProtriderConfig) -> Tuple[Result, ModelInfo, FitParameters, Grid
     logger.info('Computing statistics')
     df_res = dataset.data - df_out  # log data - pred data
 
-    use_frozen = (
-        not config.refit_null
-        and frozen_fit_params is not None
-        and np.array_equal(np.asarray(frozen_fit_params.genes), np.asarray(df_res.columns))
-    )
-    if use_frozen:
-        logger.info(
-            'Using frozen residual null from checkpoint (refit_null=False; %d proteins)',
-            len(frozen_fit_params.genes),
-        )
-        fit_params = frozen_fit_params
+    nb_extra = None
+    if config.likelihood == "nb":
+        fit_params = None  # the NB test refits theta per gene on the fitted means; nothing to freeze
+        pvals, Z, pvals_one_sided, nb_extra = _nb_statistics(dataset, df_out, config.pval_sided)
     else:
-        if not config.refit_null and frozen_fit_params is None:
-            logger.warning(
-                'refit_null=False but checkpoint has no fit_params; refitting null on current cohort'
-            )
-        elif (
+        use_frozen = (
             not config.refit_null
             and frozen_fit_params is not None
-            and not np.array_equal(np.asarray(frozen_fit_params.genes), np.asarray(df_res.columns))
-        ):
-            logger.warning(
-                'refit_null=False but checkpoint protein order differs from cohort; refitting null'
-            )
-        fit_params = fit_residuals(
-            df_res,
-            dis=config.pval_dist,
-            n_jobs=config.n_jobs,
-            use_common_df=config.common_degrees_freedom,
+            and np.array_equal(np.asarray(frozen_fit_params.genes), np.asarray(df_res.columns))
         )
-        # Persist null into the checkpoint so a later refit_null=False run can reuse it.
-        if checkpoint_path and (should_train or frozen_fit_params is None):
-            save_model(model, str(checkpoint_path), q, fit_params=fit_params)
+        if use_frozen:
+            logger.info(
+                'Using frozen residual null from checkpoint (refit_null=False; %d proteins)',
+                len(frozen_fit_params.genes),
+            )
+            fit_params = frozen_fit_params
+        else:
+            if not config.refit_null and frozen_fit_params is None:
+                logger.warning(
+                    'refit_null=False but checkpoint has no fit_params; refitting null on current cohort'
+                )
+            elif (
+                not config.refit_null
+                and frozen_fit_params is not None
+                and not np.array_equal(np.asarray(frozen_fit_params.genes), np.asarray(df_res.columns))
+            ):
+                logger.warning(
+                    'refit_null=False but checkpoint protein order differs from cohort; refitting null'
+                )
+            fit_params = fit_residuals(
+                df_res,
+                dis=config.pval_dist,
+                n_jobs=config.n_jobs,
+                use_common_df=config.common_degrees_freedom,
+            )
+            # Persist null into the checkpoint so a later refit_null=False run can reuse it.
+            if checkpoint_path and (should_train or frozen_fit_params is None):
+                save_model(model, str(checkpoint_path), q, fit_params=fit_params)
 
-    pvals, Z = get_pvals(df_res.values,
-                         fit_params=fit_params,
-                         how=config.pval_sided,
-                         dis=config.pval_dist, n_jobs=config.n_jobs)
-    pvals_one_sided, _ = get_pvals(df_res.values,
-                                   fit_params=fit_params,
-                                   how='left',
-                                   dis=config.pval_dist, n_jobs=config.n_jobs)
+        pvals, Z = get_pvals(df_res.values,
+                             fit_params=fit_params,
+                             how=config.pval_sided,
+                             dis=config.pval_dist, n_jobs=config.n_jobs)
+        pvals_one_sided, _ = get_pvals(df_res.values,
+                                       fit_params=fit_params,
+                                       how='left',
+                                       dis=config.pval_dist, n_jobs=config.n_jobs)
 
     pvals_adj = adjust_pvals(pvals, method=config.pval_adj)
     latent_space = None
@@ -661,7 +680,7 @@ def run(config: ProtriderConfig) -> Tuple[Result, ModelInfo, FitParameters, Grid
                              pseudocount=config.pseudocount, outlier_threshold=config.outlier_threshold,
                              base_fn=config.base_fn, pval_dist=config.pval_dist,
                              latent_space=latent_space,
-                             patient_similarity=patient_similarity)
+                             patient_similarity=patient_similarity, nb_extra=nb_extra)
     if config.export_cooutlier_patient_similarity:
         result.cooutlier_similarity = compute_cooutlier_similarity(
             result.df_Z,
@@ -677,11 +696,25 @@ def run(config: ProtriderConfig) -> Tuple[Result, ModelInfo, FitParameters, Grid
     return result, model_info, fit_params, gs_result
 
 
+def _nb_statistics(dataset, df_out, how='two-sided'):
+    """NB test of the raw counts on the fitted means (likelihood='nb'): p-values (two-sided, left), z = log2 fold change / gene SD, and the means."""
+    counts = dataset.raw_data.to_numpy(dtype=float)
+    mask = np.asarray(dataset.mask)
+    mu = np.exp(df_out.to_numpy()) * np.asarray(dataset.size_factors, dtype=float)[:, None]
+    theta = fit_nb_theta_ml(counts, mu, mask)
+    pvals = get_pvals_nb(counts, mu, theta, mask, how)
+    pvals_one_sided = get_pvals_nb(counts, mu, theta, mask, 'left')
+    l2fc = np.log2((np.where(mask, np.nan, counts) + 1.0) / (mu + 1.0))
+    sd = np.nan_to_num(np.nanstd(l2fc, axis=0), nan=1e-6)
+    Z = l2fc / np.where(sd >= 1e-6, sd, 1e-6)
+    return pvals, Z, pvals_one_sided, {'mu': mu, 'l2fc': l2fc, 'theta': theta}
+
+
 def _inference(dataset: Union[ProtriderDataset, ProtriderSubset], model: ProtriderAutoencoder, criterion: MSEBCELoss):
     X_out = model(dataset.X, dataset.torch_mask, cond=dataset.covariates)
 
     loss, mse_loss, bce_loss = criterion(
-        X_out, dataset.X, dataset.torch_mask, detached=True)
+        X_out, dataset.X, dataset.torch_mask, *dataset.nb_extras(), detached=True)
     df_presence = None
     if model.presence_absence:
         presence_hat = torch.sigmoid(X_out[1])  # Predicted presence (0–1)
@@ -698,7 +731,7 @@ def _inference(dataset: Union[ProtriderDataset, ProtriderSubset], model: Protrid
     return df_out, df_presence, loss, mse_loss, bce_loss
 
 
-def _format_results(df_out, df_res, df_presence, pvals, Z, pvals_one_sided, pvals_adj, dataset, pseudocount, outlier_threshold, base_fn, pval_dist, latent_space=None, patient_similarity=None):
+def _format_results(df_out, df_res, df_presence, pvals, Z, pvals_one_sided, pvals_adj, dataset, pseudocount, outlier_threshold, base_fn, pval_dist, latent_space=None, patient_similarity=None, nb_extra=None):
     # Store as df
     df_pvals_adj = pd.DataFrame(pvals_adj)
     df_pvals_adj.columns = dataset.data.columns
@@ -718,10 +751,17 @@ def _format_results(df_out, df_res, df_presence, pvals, Z, pvals_one_sided, pval
     df_pvals_one_sided.index = dataset.data.index
 
     pseudocount = pseudocount  # 0.01
-    log2fc = np.log2(base_fn(dataset.data) + pseudocount) - \
-        np.log2(base_fn(df_out) + pseudocount)
-    fc = (base_fn(dataset.data) + pseudocount) / \
-        (base_fn(df_out) + pseudocount)
+    df_expected_counts = None
+    if nb_extra is not None:  # likelihood='nb': OUTRIDER-style log2 fold change of the counts over the fitted means
+        pval_dist = 'nb'
+        log2fc = pd.DataFrame(nb_extra['l2fc'], index=dataset.data.index, columns=dataset.data.columns)
+        fc = 2.0 ** log2fc
+        df_expected_counts = pd.DataFrame(nb_extra['mu'], index=dataset.data.index, columns=dataset.data.columns)
+    else:
+        log2fc = np.log2(base_fn(dataset.data) + pseudocount) - \
+            np.log2(base_fn(df_out) + pseudocount)
+        fc = (base_fn(dataset.data) + pseudocount) / \
+            (base_fn(df_out) + pseudocount)
 
     outs_per_sample = np.sum(df_pvals_adj.values <= outlier_threshold, axis=1)
     n_out_median = np.nanmedian(outs_per_sample)
@@ -736,4 +776,4 @@ def _format_results(df_out, df_res, df_presence, pvals, Z, pvals_one_sided, pval
     return Result(dataset=dataset, df_out=df_out, df_res=df_res, df_presence=df_presence, df_pvals=df_pvals, df_Z=df_Z,
                   df_pvals_one_sided=df_pvals_one_sided, df_pvals_adj=df_pvals_adj, log2fc=log2fc, fc=fc, n_out_median=n_out_median, n_out_max=n_out_max,
                   n_out_total=n_out_total, pval_dist=pval_dist, outlier_threshold=outlier_threshold,
-                  latent_space=latent_space, patient_similarity=patient_similarity)
+                  latent_space=latent_space, patient_similarity=patient_similarity, df_expected_counts=df_expected_counts)
