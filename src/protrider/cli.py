@@ -405,21 +405,31 @@ def plot_cv_before_after(ctx):
     help="Configuration file containing PROTRIDER custom options",
     type=click.Path(exists=True, dir_okay=False),
 )
-def run_cli(config: str):
+@click.option("--confidence-intervals", "confidence_intervals", is_flag=True, default=None,
+              help="Add cohort-stability median / q025 / q975 of z, p, padj, log2FC, FC to protrider_summary.csv (runs cohort stability).")
+@click.option("--robust", "robust", is_flag=True, default=None,
+              help="Also report Student-t p-values and padj (PROTEIN_PVALUE_ROBUST, PROTEIN_PADJ_ROBUST).")
+def run_cli(config: str, confidence_intervals: bool = None, robust: bool = None):
     """Run the PROTRIDER pipeline.
     """
-    run(config)
+    run(config, confidence_intervals=confidence_intervals, robust=robust)
 
 
-def run(config_path: str):
-    """Run the PROTRIDER pipeline.
-    """
+def run(config_path: str, confidence_intervals: bool = None, robust: bool = None):
+    """Run the PROTRIDER pipeline. The two flags override the config keys of the same meaning when given."""
     if config_path is None:
         click.echo('No config file provided. Exiting.')
         return
 
     # Load and validate config using ProtriderConfig dataclass
     config = load_config(config_path)
+    from dataclasses import replace as _replace
+    if robust:
+        config = _replace(config, robust_pvals=True)
+    if confidence_intervals:
+        config = _replace(config, confidence_intervals=True)
+    if config.confidence_intervals and not config.cohort_stability:
+        config = _replace(config, cohort_stability=True)
 
     out_dir = config.out_dir
     if out_dir is None:
@@ -489,6 +499,16 @@ def run(config_path: str):
                 bs_summary.shape,
                 out_bs,
             )
+            if config.confidence_intervals:
+                from protrider.stability import merge_confidence_intervals
+
+                long_df = result.to_long_df(include_all=config.report_all)
+                merged = merge_confidence_intervals(long_df, bs_summary)
+                out_p = Path(config.out_dir) / "protrider_summary.csv"
+                merged.to_csv(out_p, index=False)
+                logger.info("Rewrote %s with confidence intervals, shape %s", out_p, merged.shape)
+        elif config.confidence_intervals:
+            logger.warning("confidence_intervals requested but cohort stability was skipped; no intervals written")
 
 if __name__ == '__main__':
     cli(obj={})

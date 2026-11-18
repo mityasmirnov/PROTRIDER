@@ -4,6 +4,11 @@
 
 ### Added
 
+- Normalised intensity `PROTEIN_NORM_LOG2INT` = observed − expected + protein mean, and `PROTEIN_NORM_INT` (OUTRIDER normcounts analogue) in the long summary.
+- `robust_pvals` / CLI `--robust`: Student-*t* p-values and padj (`PROTEIN_PVALUE_ROBUST`, `PROTEIN_PADJ_ROBUST`) beside the primary ones; carried through cohort stability.
+- `confidence_intervals` / CLI `--confidence-intervals`: median / q025 / q975 of z, p, padj, log2FC, FC (and robust p / padj) plus call rate merged into `protrider_summary.csv` (`stability.merge_confidence_intervals`).
+- Tests: `tests/test_norm_ci_robust.py`.
+
 - `likelihood: nb`: negative-binomial autoencoder for raw count matrices (an OUTRIDER-style caller). Median-of-ratios size factors, input log((k + 1) / s), decoder output = log mean of the normalised counts (mu = exp(output) * s), NB negative log-likelihood with one dispersion per gene learned jointly (`NBLoss`), encoder input centred on the gene means. Scoring: NB p-values on the fitted means with the per-gene maximum-likelihood dispersion (grid), z = log2 fold change / gene SD, `Result.df_expected_counts` (and `expected_counts.csv`). `find_q_method` is `OHT` or a fixed integer. The Gaussian default is unchanged.
 - Tests: `tests/test_nb_likelihood.py`.
 

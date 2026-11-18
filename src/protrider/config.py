@@ -100,6 +100,14 @@ class ProtriderConfig:
     # (docs/19 §5.4 inductive clinical scoring). Default True keeps legacy behaviour.
     refit_null: bool = True
 
+    # Robust p-values: also report Student-t p-values / BH padj next to the primary ones
+    # (PROTEIN_PVALUE_ROBUST, PROTEIN_PADJ_ROBUST); only p and padj change.
+    robust_pvals: bool = False
+
+    # Confidence intervals: fold the cohort-stability median / q025 / q975 of z, p, padj,
+    # log2FC and FC (and the outlier call rate) into protrider_summary.csv. Implies cohort_stability.
+    confidence_intervals: bool = False
+
     # Cohort stability analysis (subsampling; not classical bootstrap)
     cohort_stability: bool = False
     cohort_stability_n_runs: int = 100
@@ -380,6 +388,8 @@ def _normalize_config_dict(config_dict: dict) -> dict:
         "report_all",
         "verbose",
         "use_wandb",
+        "robust_pvals",
+        "confidence_intervals",
         "cohort_stability",
         "cohort_stability_require_oht",
         "cohort_stability_save_iteration_files",

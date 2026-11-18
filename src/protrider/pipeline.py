@@ -137,6 +137,10 @@ class Result:
     patient_similarity: Optional[PatientSimilarity] = None
     cooutlier_similarity: Optional[CoOutlierSimilarity] = None
     df_expected_counts: Optional[pd.DataFrame] = None  # likelihood='nb': fitted mean counts (mu = exp(output) * size factor)
+    df_norm: Optional[pd.DataFrame] = None  # normalised log intensity: observed - expected + protein mean (OUTRIDER normcounts analogue)
+    df_norm_int: Optional[pd.DataFrame] = None  # df_norm on the intensity scale (base_fn)
+    df_pvals_robust: Optional[pd.DataFrame] = None  # robust_pvals: Student-t p-values
+    df_pvals_adj_robust: Optional[pd.DataFrame] = None
 
     def to_long_df(self, include_all: bool = False) -> pd.DataFrame:
         """
@@ -161,6 +165,10 @@ class Result:
             'PROTEIN_LOG2FC': self.log2fc,
             'PROTEIN_FC': self.fc,
         }
+        for name, df in (('PROTEIN_NORM_LOG2INT', self.df_norm), ('PROTEIN_NORM_INT', self.df_norm_int),
+                         ('PROTEIN_PVALUE_ROBUST', self.df_pvals_robust), ('PROTEIN_PADJ_ROBUST', self.df_pvals_adj_robust)):
+            if df is not None:
+                dfs_to_melt[name] = df
 
         if self.df_presence is not None:
             dfs_to_melt['pred_presence_probability'] = self.df_presence
@@ -667,6 +675,11 @@ def run(config: ProtriderConfig) -> Tuple[Result, ModelInfo, FitParameters, Grid
                                        dis=config.pval_dist, n_jobs=config.n_jobs)
 
     pvals_adj = adjust_pvals(pvals, method=config.pval_adj)
+    robust = None
+    if config.robust_pvals and nb_extra is None:  # likelihood='nb' has its own NB test; robust p only for log-intensity models
+        fit_params_t = fit_residuals(df_res, dis='t', n_jobs=config.n_jobs, use_common_df=config.common_degrees_freedom)
+        pvals_t, _ = get_pvals(df_res.values, fit_params=fit_params_t, how=config.pval_sided, dis='t', n_jobs=config.n_jobs)
+        robust = (pvals_t, adjust_pvals(pvals_t, method=config.pval_adj))
     latent_space = None
     if config.export_latent_space:
         latent_space = extract_latent_space(dataset, model, q)
@@ -680,7 +693,7 @@ def run(config: ProtriderConfig) -> Tuple[Result, ModelInfo, FitParameters, Grid
                              pseudocount=config.pseudocount, outlier_threshold=config.outlier_threshold,
                              base_fn=config.base_fn, pval_dist=config.pval_dist,
                              latent_space=latent_space,
-                             patient_similarity=patient_similarity, nb_extra=nb_extra)
+                             patient_similarity=patient_similarity, nb_extra=nb_extra, robust=robust)
     if config.export_cooutlier_patient_similarity:
         result.cooutlier_similarity = compute_cooutlier_similarity(
             result.df_Z,
@@ -731,7 +744,7 @@ def _inference(dataset: Union[ProtriderDataset, ProtriderSubset], model: Protrid
     return df_out, df_presence, loss, mse_loss, bce_loss
 
 
-def _format_results(df_out, df_res, df_presence, pvals, Z, pvals_one_sided, pvals_adj, dataset, pseudocount, outlier_threshold, base_fn, pval_dist, latent_space=None, patient_similarity=None, nb_extra=None):
+def _format_results(df_out, df_res, df_presence, pvals, Z, pvals_one_sided, pvals_adj, dataset, pseudocount, outlier_threshold, base_fn, pval_dist, latent_space=None, patient_similarity=None, nb_extra=None, robust=None):
     # Store as df
     df_pvals_adj = pd.DataFrame(pvals_adj)
     df_pvals_adj.columns = dataset.data.columns
@@ -773,7 +786,18 @@ def _format_results(df_out, df_res, df_presence, pvals, Z, pvals_one_sided, pval
     logger.info(
         f'Finished computing pvalues. No. outliers per sample in median: {np.nanmedian(outs_per_sample)}')
 
+    df_norm = df_norm_int = df_pvals_robust = df_pvals_adj_robust = None
+    if nb_extra is None:
+        # observed minus what the model explains (mix / covariates / latent factors), back on the protein's own level
+        df_norm = dataset.data - df_out + dataset.data.mean(axis=0)
+        if base_fn is not None:
+            df_norm_int = base_fn(df_norm)
+    if robust is not None:
+        df_pvals_robust = pd.DataFrame(robust[0], index=dataset.data.index, columns=dataset.data.columns)
+        df_pvals_adj_robust = pd.DataFrame(robust[1], index=dataset.data.index, columns=dataset.data.columns)
+
     return Result(dataset=dataset, df_out=df_out, df_res=df_res, df_presence=df_presence, df_pvals=df_pvals, df_Z=df_Z,
                   df_pvals_one_sided=df_pvals_one_sided, df_pvals_adj=df_pvals_adj, log2fc=log2fc, fc=fc, n_out_median=n_out_median, n_out_max=n_out_max,
                   n_out_total=n_out_total, pval_dist=pval_dist, outlier_threshold=outlier_threshold,
-                  latent_space=latent_space, patient_similarity=patient_similarity, df_expected_counts=df_expected_counts)
+                  latent_space=latent_space, patient_similarity=patient_similarity, df_expected_counts=df_expected_counts,
+                  df_norm=df_norm, df_norm_int=df_norm_int, df_pvals_robust=df_pvals_robust, df_pvals_adj_robust=df_pvals_adj_robust)

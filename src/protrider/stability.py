@@ -37,6 +37,11 @@ STABILITY_METRIC_COLUMNS = [
     "PROTEIN_outlier",
 ]
 
+ROBUST_METRIC_COLUMNS = ["PROTEIN_PVALUE_ROBUST", "PROTEIN_PADJ_ROBUST"]
+
+# Metrics that get confidence intervals in the main summary (never the intensities).
+CI_METRICS = ["PROTEIN_ZSCORE", "PROTEIN_PVALUE", "PROTEIN_PADJ", "PROTEIN_LOG2FC", "PROTEIN_FC"] + ROBUST_METRIC_COLUMNS
+
 _SAMPLE_ID_COLUMN_CANDIDATES = ("sample_ID", "sampleID", "sample_id")
 
 
@@ -351,7 +356,8 @@ def _run_single_stability_iteration(
         result.save(iter_config.out_dir, format="wide")
         result.save(iter_config.out_dir, format="long", include_all=True)
     long_df = result.to_long_df(include_all=True)
-    return long_df[STABILITY_METRIC_COLUMNS].copy()
+    cols = STABILITY_METRIC_COLUMNS + [c for c in ROBUST_METRIC_COLUMNS if c in long_df.columns]
+    return long_df[cols].copy()
 
 
 def _summarize_stability(
@@ -376,14 +382,9 @@ def _summarize_stability(
     )
 
     agg_parts = [bs_n_observed, outlier_count]
-    for col, prefix in [
-        ("PROTEIN_FC", "PROTEIN_FC"),
-        ("PROTEIN_LOG2FC", "PROTEIN_LOG2FC"),
-        ("PROTEIN_ZSCORE", "PROTEIN_ZSCORE"),
-        ("PROTEIN_PVALUE", "PROTEIN_PVALUE"),
-        ("PROTEIN_PADJ", "PROTEIN_PADJ"),
-    ]:
-        agg_parts.append(_metric_stability_table(grouped[col], prefix))
+    for col in ["PROTEIN_FC", "PROTEIN_LOG2FC", "PROTEIN_ZSCORE", "PROTEIN_PVALUE", "PROTEIN_PADJ"] + [
+            c for c in ROBUST_METRIC_COLUMNS if c in combined.columns]:
+        agg_parts.append(_metric_stability_table(grouped[col], col))
 
     stability = pd.concat(agg_parts, axis=1).reset_index()
 
@@ -476,3 +477,19 @@ def _metric_stability_table(series_group, prefix: str) -> pd.DataFrame:
     return pd.concat([core, q025, q975], axis=1).drop(
         columns=[f"{prefix}_count"], errors="ignore"
     )
+
+
+def merge_confidence_intervals(long_df: pd.DataFrame, bs_summary: pd.DataFrame) -> pd.DataFrame:
+    """Add <metric>_median / _q025 / _q975 for CI_METRICS plus the outlier call rate and run counts
+    from the cohort-stability summary to the standard long summary (left join on sampleID, proteinID)."""
+    keep = ["sampleID", "proteinID"]
+    for m in CI_METRICS:
+        keep += [c for c in (f"{m}_median", f"{m}_q025", f"{m}_q975") if c in bs_summary.columns]
+    keep += [c for c in ("PROTEIN_outlier_call_rate", "BS_N_OBSERVED", "BS_N_RUNS_COMPLETED") if c in bs_summary.columns]
+    ci = bs_summary[keep].copy()
+    out = long_df.copy()
+    out["sampleID"] = out["sampleID"].astype(str)
+    out["proteinID"] = out["proteinID"].astype(str)
+    ci["sampleID"] = ci["sampleID"].astype(str)
+    ci["proteinID"] = ci["proteinID"].astype(str)
+    return out.merge(ci, on=["sampleID", "proteinID"], how="left")

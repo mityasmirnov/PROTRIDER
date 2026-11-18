@@ -98,6 +98,8 @@ An example dataset is included under `sample_data/`.
 | `cohort_stability_seed` | Seed for subsampling and per-iteration models (defaults to `seed`) |
 | `cohort_stability_require_oht` | Require `find_q_method: "OHT"` when stability is enabled (default: `true`) |
 | `cohort_stability_save_iteration_files` | Save per-iteration wide and long outputs under each temp iteration directory (default: `false`) |
+| `robust_pvals` | Also report Student-*t* p-values and BH padj (`PROTEIN_PVALUE_ROBUST`, `PROTEIN_PADJ_ROBUST`) next to the primary ones; only p and padj change (default: `false`; CLI `--robust`) |
+| `confidence_intervals` | Run cohort stability and add `<metric>_median` / `_q025` / `_q975` of z, p, padj, log2FC, FC (and the robust p / padj) plus `PROTEIN_outlier_call_rate`, `BS_N_OBSERVED`, `BS_N_RUNS_COMPLETED` to `protrider_summary.csv`; no intervals for intensities (default: `false`; CLI `--confidence-intervals`) |
 | `export_cooutlier_patient_similarity` | Export co-outlier patient stratification tables (default: `true`) |
 | `z_threshold` | Absolute Z-score cutoff for up/down co-outlier bins (default: `3.0`) |
 | `cooutlier_min_anomalies` | Minimum aberrant proteins per sample for clustering/projections (default: `1`) |
@@ -106,6 +108,17 @@ An example dataset is included under `sample_data/`.
 
 
 </details>
+
+### Normalised intensity, robust p-values and confidence intervals
+
+Every log-intensity run reports, next to the raw (`PROTEIN_INT`), observed log (`PROTEIN_LOG2INT`) and expected (`PROTEIN_EXPECTED_LOG2INT`) intensity, a **normalised intensity** in the spirit of OUTRIDER's normalised counts:
+`PROTEIN_NORM_LOG2INT = PROTEIN_LOG2INT − PROTEIN_EXPECTED_LOG2INT + mean over samples of PROTEIN_LOG2INT` (the observed value with what the model explains — batch, covariates, latent factors — removed, on the protein's own level), and `PROTEIN_NORM_INT` on the intensity scale. Not computed for `likelihood: nb`.
+
+```bash
+protrider run --config config.yaml --robust --confidence-intervals
+```
+
+`--robust` adds Student-*t* p-values and padj (useful when the primary `pval_dist` is `gaussian`). `--confidence-intervals` implies cohort stability (OHT, > 30 samples) and folds its central 95 % intervals into the main summary; `protrider_summary_bs.csv` is still written.
 
 ### Cohort stability analysis
 
