@@ -407,8 +407,8 @@ def plot_cv_before_after(ctx):
 )
 @click.option("--confidence-intervals", "confidence_intervals", is_flag=True, default=None,
               help="Add cohort-stability median / q025 / q975 of z, p, padj, log2FC, FC to protrider_summary.csv (runs cohort stability).")
-@click.option("--robust", "robust", is_flag=True, default=None,
-              help="Also report Student-t p-values and padj (PROTEIN_PVALUE_ROBUST, PROTEIN_PADJ_ROBUST).")
+@click.option("--robust-fit", "robust", is_flag=True, default=None,
+              help="Also report p-values / padj from a robust fit of the same null distribution (PROTEIN_PVALUE_ROBUST, PROTEIN_PADJ_ROBUST).")
 def run_cli(config: str, confidence_intervals: bool = None, robust: bool = None):
     """Run the PROTRIDER pipeline.
     """
@@ -425,7 +425,7 @@ def run(config_path: str, confidence_intervals: bool = None, robust: bool = None
     config = load_config(config_path)
     from dataclasses import replace as _replace
     if robust:
-        config = _replace(config, robust_pvals=True)
+        config = _replace(config, robust_fit=True)
     if confidence_intervals:
         config = _replace(config, confidence_intervals=True)
     if config.confidence_intervals and not config.cohort_stability:

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .model import train, MSEBCELoss, NBLoss, ProtriderAutoencoder, find_latent_dim, init_model, ModelInfo, GridSearchResult
 from .datasets import ProtriderDataset, ProtriderSubset
-from .stats import get_pvals, fit_residuals, adjust_pvals, FitParameters, init_nb_theta, fit_nb_theta_ml, get_pvals_nb
+from .stats import get_pvals, fit_residuals, adjust_pvals, FitParameters, init_nb_theta, fit_nb_theta_ml, get_pvals_nb, robust_outlier_mask
 from .config import ProtriderConfig
 from .latent import LatentSpace, extract_latent_space
 from .patient_similarity import PatientSimilarity, compute_patient_similarity
@@ -139,7 +139,7 @@ class Result:
     df_expected_counts: Optional[pd.DataFrame] = None  # likelihood='nb': fitted mean counts (mu = exp(output) * size factor)
     df_norm: Optional[pd.DataFrame] = None  # normalised log intensity: observed - expected + protein mean (OUTRIDER normcounts analogue)
     df_norm_int: Optional[pd.DataFrame] = None  # df_norm on the intensity scale (base_fn)
-    df_pvals_robust: Optional[pd.DataFrame] = None  # robust_pvals: Student-t p-values
+    df_pvals_robust: Optional[pd.DataFrame] = None  # robust_fit: p-values from the robust distribution fit
     df_pvals_adj_robust: Optional[pd.DataFrame] = None
 
     def to_long_df(self, include_all: bool = False) -> pd.DataFrame:
@@ -676,10 +676,18 @@ def run(config: ProtriderConfig) -> Tuple[Result, ModelInfo, FitParameters, Grid
 
     pvals_adj = adjust_pvals(pvals, method=config.pval_adj)
     robust = None
-    if config.robust_pvals and nb_extra is None:  # likelihood='nb' has its own NB test; robust p only for log-intensity models
-        fit_params_t = fit_residuals(df_res, dis='t', n_jobs=config.n_jobs, use_common_df=config.common_degrees_freedom)
-        pvals_t, _ = get_pvals(df_res.values, fit_params=fit_params_t, how=config.pval_sided, dis='t', n_jobs=config.n_jobs)
-        robust = (pvals_t, adjust_pvals(pvals_t, method=config.pval_adj))
+    if config.robust_fit:
+        if nb_extra is None:
+            fit_params_r = fit_residuals(df_res, dis=config.pval_dist, n_jobs=config.n_jobs,
+                                         use_common_df=config.common_degrees_freedom, robust=True, trim_z=config.robust_trim_z)
+            pvals_r, _ = get_pvals(df_res.values, fit_params=fit_params_r, how=config.pval_sided, dis=config.pval_dist, n_jobs=config.n_jobs)
+        else:  # NB: dispersion refitted without the gross outliers (robust z of the log2 fold change)
+            counts = dataset.raw_data.to_numpy(dtype=float)
+            mask = np.asarray(dataset.mask)
+            mask_r = mask | robust_outlier_mask(nb_extra['l2fc'], config.robust_trim_z)
+            theta_r = fit_nb_theta_ml(counts, nb_extra['mu'], mask_r)
+            pvals_r = get_pvals_nb(counts, nb_extra['mu'], theta_r, mask, config.pval_sided)
+        robust = (pvals_r, adjust_pvals(pvals_r, method=config.pval_adj))
     latent_space = None
     if config.export_latent_space:
         latent_space = extract_latent_space(dataset, model, q)

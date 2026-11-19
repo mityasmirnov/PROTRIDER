@@ -58,8 +58,25 @@ class FitParameters:
         df = pd.DataFrame(self.to_dict())
         df.to_csv(Path(out_dir) / 'fit_parameters.csv', index=False)
 
-def fit_residuals(res, dis='gaussian', n_jobs=-1, use_common_df=True):
+def robust_outlier_mask(x, trim_z=4.0):
+    """Cells that a robust standardisation (per column: median, 1.4826 * MAD) puts beyond +-trim_z.
+    Used to keep gross outliers out of the distribution fit; NaN cells are never flagged."""
+    x = np.asarray(x, dtype=float)
+    med = np.nanmedian(x, axis=0)
+    mad = 1.4826 * np.nanmedian(np.abs(x - med), axis=0)
+    sd = np.nanstd(x, axis=0, ddof=1)
+    scale = np.where(mad > 1e-12, mad, np.where(sd > 1e-12, sd, np.inf))  # MAD 0 (sparse column): fall back to SD
+    with np.errstate(invalid='ignore'):
+        return np.isfinite(x) & (np.abs(x - med) / scale > trim_z)
+
+
+def fit_residuals(res, dis='gaussian', n_jobs=-1, use_common_df=True, robust=False, trim_z=4.0):
+    """Per-protein null of the residuals. robust=True: the same distribution is fitted on the cells that a
+    median / MAD standardisation keeps within +-trim_z, so gross outliers do not inflate the scale (or distort
+    the location / degrees of freedom); the fitted parameters are then applied to every cell."""
     matrix = np.asarray(res)
+    if robust:
+        matrix = np.where(robust_outlier_mask(matrix, trim_z), np.nan, matrix)
     genes = np.array(res.columns)
     if dis == 'gaussian':
         sigma = np.nanstd(matrix, ddof=1, axis=0)

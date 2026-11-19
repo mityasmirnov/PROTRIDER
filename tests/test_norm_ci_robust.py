@@ -1,4 +1,4 @@
-"""Normalised intensity, robust (Student-t) p-values and confidence-interval merge."""
+"""Normalised intensity, robust distribution fit (p / padj) and confidence-interval merge."""
 
 import tempfile
 
@@ -7,6 +7,7 @@ import pandas as pd
 
 from protrider import ProtriderConfig, run
 from protrider.stability import merge_confidence_intervals
+from protrider.stats import fit_residuals, get_pvals, robust_outlier_mask
 
 
 def _run(tmp_dir, protein_intensities_path, covariates_path, index_col, **kw):
@@ -32,18 +33,33 @@ def test_normalised_intensity(protein_intensities_path, covariates_path, protein
         assert 'PROTEIN_PVALUE_ROBUST' not in long.columns  # flag off
 
 
-def test_robust_pvals(protein_intensities_path, covariates_path, protein_intensities_index_col):
+def test_robust_fit_ignores_gross_outliers():
+    rng = np.random.default_rng(0)
+    x = rng.normal(0, 1.0, (200, 30))
+    x[:6, :] += 12.0  # six gross outliers per protein
+    res = pd.DataFrame(x, columns=[f"p{i}" for i in range(30)])
+    plain = fit_residuals(res, dis="gaussian")
+    robust = fit_residuals(res, dis="gaussian", robust=True)
+    assert np.median(plain.sigmas) > 2.0  # inflated by the outliers
+    assert 0.9 < np.median(robust.sigmas) < 1.1 and abs(np.median(robust.means)) < 0.2
+    assert robust_outlier_mask(x)[:6].all() and robust_outlier_mask(x)[6:].mean() < 0.01
+    p_plain, _ = get_pvals(x, plain, dis="gaussian")
+    p_rob, _ = get_pvals(x, robust, dis="gaussian")
+    assert (p_rob[:6] < p_plain[:6]).all()  # the outliers are not masked by their own inflated sigma
+    t_rob = fit_residuals(res, dis="t", robust=True, n_jobs=1)
+    assert np.isfinite(t_rob.sigmas).all() and np.isfinite(t_rob.degrees_freedoms).all()
+
+
+def test_robust_fit_pipeline(protein_intensities_path, covariates_path, protein_intensities_index_col):
     with tempfile.TemporaryDirectory() as tmp:
-        r = _run(tmp, protein_intensities_path, covariates_path, protein_intensities_index_col, robust_pvals=True)
+        r = _run(tmp, protein_intensities_path, covariates_path, protein_intensities_index_col, robust_fit=True)
         long = r.to_long_df(include_all=True)
         assert {'PROTEIN_PVALUE_ROBUST', 'PROTEIN_PADJ_ROBUST'} <= set(long.columns)
         ok = long.PROTEIN_PVALUE_ROBUST.notna()
         assert ok.any()
         assert ((long.PROTEIN_PVALUE_ROBUST[ok] >= 0) & (long.PROTEIN_PVALUE_ROBUST[ok] <= 1)).all()
         assert (long.PROTEIN_PADJ_ROBUST[ok] >= long.PROTEIN_PVALUE_ROBUST[ok] - 1e-12).all()
-        # primary (gaussian) p-values are unchanged by the flag
-        r0 = _run(tmp + "_0", protein_intensities_path, covariates_path, protein_intensities_index_col, seed=1)
-        assert r0.df_pvals_robust is None
+        assert (long.PROTEIN_ZSCORE.notna() == long.PROTEIN_PVALUE.notna()).all()
 
 
 def test_merge_confidence_intervals():

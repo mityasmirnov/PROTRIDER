@@ -100,9 +100,11 @@ class ProtriderConfig:
     # (docs/19 §5.4 inductive clinical scoring). Default True keeps legacy behaviour.
     refit_null: bool = True
 
-    # Robust p-values: also report Student-t p-values / BH padj next to the primary ones
-    # (PROTEIN_PVALUE_ROBUST, PROTEIN_PADJ_ROBUST); only p and padj change.
-    robust_pvals: bool = False
+    # Robust distribution fit: refit the same null distribution (gaussian / t residuals, or the NB dispersion
+    # for likelihood='nb') without the cells a median / MAD standardisation puts beyond +-robust_trim_z, and
+    # report PROTEIN_PVALUE_ROBUST / PROTEIN_PADJ_ROBUST next to the primary ones; only p and padj change.
+    robust_fit: bool = False
+    robust_trim_z: float = 4.0
 
     # Confidence intervals: fold the cohort-stability median / q025 / q975 of z, p, padj,
     # log2FC and FC (and the outlier call rate) into protrider_summary.csv. Implies cohort_stability.
@@ -347,6 +349,7 @@ def _normalize_config_dict(config_dict: dict) -> dict:
         'outlier_threshold',
         'max_allowed_NAs_per_protein',
         'cohort_stability_drop_fraction',
+        'robust_trim_z',
         'cohort_stability_max_runtime_min',
         'z_threshold',
     )
@@ -388,7 +391,7 @@ def _normalize_config_dict(config_dict: dict) -> dict:
         "report_all",
         "verbose",
         "use_wandb",
-        "robust_pvals",
+        "robust_fit",
         "confidence_intervals",
         "cohort_stability",
         "cohort_stability_require_oht",

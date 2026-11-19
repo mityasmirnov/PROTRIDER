@@ -5,7 +5,7 @@
 ### Added
 
 - Normalised intensity `PROTEIN_NORM_LOG2INT` = observed − expected + protein mean, and `PROTEIN_NORM_INT` (OUTRIDER normcounts analogue) in the long summary.
-- `robust_pvals` / CLI `--robust`: Student-*t* p-values and padj (`PROTEIN_PVALUE_ROBUST`, `PROTEIN_PADJ_ROBUST`) beside the primary ones; carried through cohort stability.
+- `robust_fit` / CLI `--robust-fit` (+ `robust_trim_z`): robust distribution fit — the same null (gaussian / t residuals, NB dispersion) refitted without the cells beyond ±trim_z on a median / MAD scale; `PROTEIN_PVALUE_ROBUST`, `PROTEIN_PADJ_ROBUST` beside the primary ones; carried through cohort stability.
 - `confidence_intervals` / CLI `--confidence-intervals`: median / q025 / q975 of z, p, padj, log2FC, FC (and robust p / padj) plus call rate merged into `protrider_summary.csv` (`stability.merge_confidence_intervals`).
 - Tests: `tests/test_norm_ci_robust.py`.
 

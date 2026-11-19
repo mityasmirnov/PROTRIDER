@@ -58,3 +58,18 @@ def test_nb_config_validation():
         ProtriderConfig(input_intensities="x.tsv", out_dir="o", likelihood="nb", presence_absence=True)
     assert ProtriderConfig(input_intensities="x.tsv", out_dir="o", likelihood="nb", find_q_method="OHT").likelihood == "nb"
     assert ProtriderConfig(input_intensities="x.tsv", out_dir="o").likelihood == "gaussian"  # default unchanged
+
+
+def test_nb_robust_fit_refits_dispersion_without_outliers(tmp_path):
+    counts, _ = _counts()
+    gene = int(np.argmax(counts.mean(axis=0)))
+    counts[7, gene] = 0.0
+    counts[3, gene] *= 8.0  # a second, gain outlier in the same gene inflates its dispersion
+    df = pd.DataFrame(counts.T, index=[f"g{i}" for i in range(counts.shape[1])], columns=[f"s{j}" for j in range(counts.shape[0])])
+    df.index.name = "geneID"
+    path = tmp_path / "counts.tsv"
+    df.to_csv(path, sep="\t")
+    result, *_ = run(_config(path, tmp_path / "out", robust_fit=True))
+    pr = result.df_pvals_robust
+    assert pr is not None and pr.shape == result.df_pvals.shape and np.isfinite(pr.to_numpy()).all()
+    assert pr.loc["s7", f"g{gene}"] <= result.df_pvals.loc["s7", f"g{gene}"] * 1.0001
